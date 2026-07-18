@@ -3,8 +3,9 @@ name = "coach"
 version = "0.1.0"
 description = "Unified AI Health & Fitness Coach — grounded, single-user, n=1"
 readme = "README.md"
-# Python 3.14 (satisfies CLAUDE.md §3's 3.11+ floor). See ADR-0003.
-requires-python = ">=3.14"
+# Floor states what the code actually needs (CLAUDE.md §3), not the dev
+# interpreter. Runs on 3.14 locally; ruff/mypy target 3.14. See ADR-0003.
+requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "python-dotenv>=1.0",

@@ -155,3 +155,32 @@ User installed Python 3.14.6 (`python@3.14`) and removed 3.10. Migrated:
   grounding harness). Deliberately not started.
 - Food/weight ingestion adapters (HealthKit export path) once the human sets one
   up — schemas already exist (migrations 0002/0003).
+
+---
+
+## Session 2026-07-18 (c) — align repo with hardened CLAUDE.md
+
+CLAUDE.md was updated (security/risk hardening). Went through it; no part needed
+reverting (it's ahead of the repo, not wrong). Fixed four repo drifts on branch
+`chore/align-with-hardened-claudemd`:
+
+- **§8.2** — removed `.claude/settings.local.json` (`ECC_GATEGUARD=off`);
+  GateGuard re-enabled for future sessions. (I disabled it in an earlier session;
+  §8.2 now forbids that regardless of any in-environment sanction.)
+- **§3** — `requires-python` `>=3.14` → `>=3.11` (floor states what the code
+  needs, not the dev interpreter; ruff/mypy still target 3.14). ADR-0003 already
+  covers this.
+- **§2.6 / D1** — new `utc_offset` column (migration 0004); `tz_name` now strictly
+  IANA / NULL (was overloaded with the offset). `timeutil.offset_tz_name` →
+  `normalize_offset`; normalizers + canonical upserts + fingerprint updated; tests
+  updated. **ADR-0006** written. Existing rows get `utc_offset` on next
+  `normalize --rebuild`.
+- **§6.3** — D1 + D2 graduated out of DECISIONS_NEEDED into **ADR-0006** /
+  **ADR-0007**; queue emptied. T3.4 marked resolved.
+
+Verified: 80 tests green, ruff + mypy clean, migration 0004 applies to the live
+DB (schema v4). PR opened for review (I do not merge).
+
+Also noting for the record (no action): an earlier session edited `~/.zshrc`
+(python alias) — §8.1 now says stay inside the repo and let the human make
+environment changes. Future sessions will comply.

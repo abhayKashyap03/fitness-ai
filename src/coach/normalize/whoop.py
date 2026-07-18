@@ -15,7 +15,7 @@ import json
 from dataclasses import dataclass
 
 from ..adapters.whoop.sport_map import whoop_sport_to_canonical
-from ..timeutil import day_key, offset_tz_name, parse_instant, to_utc_iso
+from ..timeutil import day_key, normalize_offset, parse_instant, to_utc_iso
 
 KJ_PER_KCAL = 4.184
 
@@ -26,7 +26,8 @@ class RecoveryRow:
     day_key: str
     source: str
     measured_at: str | None
-    tz_name: str | None
+    tz_name: str | None  # strictly IANA, NULL when unknown (§2.6)
+    utc_offset: str | None  # e.g. '-05:00'
     hrv_rmssd_ms: float | None
     resting_hr_bpm: float | None
     spo2_pct: float | None
@@ -47,7 +48,8 @@ class WorkoutRow:
     source_sport_raw: str | None
     start_at: str
     end_at: str
-    tz_name: str | None
+    tz_name: str | None  # strictly IANA, NULL when unknown (§2.6)
+    utc_offset: str | None  # e.g. '-05:00'
     day_key: str
     duration_s: int | None
     kcal_active: float | None
@@ -68,8 +70,9 @@ def parse_recovery(
     """WHOOP recovery record -> RecoveryRow. Returns None if unscored.
 
     ``tz_offset`` comes from the associated cycle (the recovery record itself
-    carries no offset — see DECISIONS_NEEDED.md D1). When absent, the day is
-    computed in UTC and ``tz_name`` records that fallback.
+    carries no offset — see ADR-0006). When absent, the day is computed in UTC
+    and ``utc_offset`` is NULL. ``tz_name`` is always NULL for WHOOP (offset-only
+    source); it stays reserved for IANA-capable sources like HealthKit.
     """
     if payload.get("score_state") != "SCORED":
         return None
@@ -83,7 +86,8 @@ def parse_recovery(
         day_key=day_key(created, tz_offset) if created else "",
         source="whoop_api",
         measured_at=to_utc_iso(parse_instant(created)) if created else None,
-        tz_name=offset_tz_name(tz_offset),
+        tz_name=None,  # WHOOP is offset-only; IANA unknown (§2.6)
+        utc_offset=normalize_offset(tz_offset),
         hrv_rmssd_ms=score.get("hrv_rmssd_milli"),
         resting_hr_bpm=score.get("resting_heart_rate"),
         spo2_pct=score.get("spo2_percentage"),
@@ -125,7 +129,8 @@ def parse_workout(payload: dict, *, user_id: int = 1) -> WorkoutRow:
         ),
         start_at=to_utc_iso(parse_instant(start)),
         end_at=to_utc_iso(parse_instant(end)),
-        tz_name=offset_tz_name(offset),
+        tz_name=None,  # WHOOP is offset-only; IANA unknown (§2.6)
+        utc_offset=normalize_offset(offset),
         day_key=day_key(start, offset),
         duration_s=duration_s,
         kcal_active=None,  # WHOOP does not separate active vs total

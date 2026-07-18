@@ -168,5 +168,7 @@ CREATE INDEX idx_raw_lookup    ON raw_events (source, record_type, recorded_at);
 --        (design: docs/adr/0002-food-entry-vs-rollup.md)
 --    * schema/migrations/0003_weight.sql — weight_measurement +
 --        weight_resolved_daily + weight_trend (EWMA)
+--    * schema/migrations/0004_utc_offset.sql — adds utc_offset to recovery +
+--        workout; tz_name is strictly IANA/NULL (docs/adr/0006-timezone-offset-vs-iana.md)
 --  Provenance/resolution rationale: docs/adr/0001-source-row-provenance.md
 -- ============================================================

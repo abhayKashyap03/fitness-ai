@@ -46,12 +46,21 @@ def test_recovery_pending_returns_none():
     assert parse_recovery(rec, tz_offset="-04:00") is None
 
 
-def test_recovery_missing_offset_falls_back_to_utc():
+def test_recovery_offset_stored_separately_from_tz_name():
+    rec = _load("recovery_page1.json")["records"][0]
+    row = parse_recovery(rec, tz_offset="-04:00")
+    assert row is not None
+    assert row.utc_offset == "-04:00"  # offset in its own column
+    assert row.tz_name is None  # tz_name is IANA-only; WHOOP gives none (§2.6)
+
+
+def test_recovery_missing_offset_is_null_not_utc():
     rec = _load("recovery_page1.json")["records"][0]
     row = parse_recovery(rec, tz_offset=None)
     assert row is not None
-    assert row.tz_name == "UTC"
-    assert row.day_key == "2026-07-10"  # created_at is 11:20Z
+    assert row.utc_offset is None  # absence is absence (§2.7), not "UTC"
+    assert row.tz_name is None
+    assert row.day_key == "2026-07-10"  # created_at is 11:20Z; day still exact
 
 
 # ---- workout ---------------------------------------------------------------
@@ -68,6 +77,8 @@ def test_workout_maps_fields_and_kj_to_kcal():
     # 1673.6 kJ / 4.184 = 400.0 kcal
     assert row.kcal_total == 400.0
     assert row.day_key == "2026-07-10"
+    assert row.utc_offset == "-04:00"  # offset column, not tz_name
+    assert row.tz_name is None  # IANA-only; WHOOP gives none (§2.6)
     assert row.hr_zones_json is not None
 
 

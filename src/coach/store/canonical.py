@@ -30,9 +30,9 @@ def upsert_recovery(
     rid = recovery_id(row)
     conn.execute(
         "INSERT OR REPLACE INTO recovery (id, user_id, day_key, source, measured_at, "
-        "tz_name, hrv_rmssd_ms, resting_hr_bpm, spo2_pct, skin_temp_c, resp_rate_bpm, "
+        "tz_name, utc_offset, hrv_rmssd_ms, resting_hr_bpm, spo2_pct, skin_temp_c, resp_rate_bpm, "
         "score, score_scale, score_method, is_official, raw_ref, derived_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             rid,
             row.user_id,
@@ -40,6 +40,7 @@ def upsert_recovery(
             row.source,
             row.measured_at,
             row.tz_name,
+            row.utc_offset,
             row.hrv_rmssd_ms,
             row.resting_hr_bpm,
             row.spo2_pct,
@@ -62,10 +63,10 @@ def upsert_workout(
     wid = workout_id(row)
     conn.execute(
         "INSERT OR REPLACE INTO workout (id, user_id, source, external_id, sport_type, "
-        "source_sport_raw, start_at, end_at, tz_name, day_key, duration_s, kcal_active, "
+        "source_sport_raw, start_at, end_at, tz_name, utc_offset, day_key, duration_s, kcal_active, "
         "kcal_total, avg_hr_bpm, max_hr_bpm, strain, distance_m, hr_zones_json, "
         "raw_ref, derived_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             wid,
             row.user_id,
@@ -76,6 +77,7 @@ def upsert_workout(
             row.start_at,
             row.end_at,
             row.tz_name,
+            row.utc_offset,
             row.day_key,
             row.duration_s,
             row.kcal_active,
@@ -101,14 +103,14 @@ def canonical_fingerprint(conn: sqlite3.Connection) -> str:
 
     parts: list[str] = []
     rec_cols = (
-        "id,user_id,day_key,source,measured_at,tz_name,hrv_rmssd_ms,resting_hr_bpm,"
+        "id,user_id,day_key,source,measured_at,tz_name,utc_offset,hrv_rmssd_ms,resting_hr_bpm,"
         "spo2_pct,skin_temp_c,resp_rate_bpm,score,score_scale,score_method,is_official,raw_ref"
     )
     for r in conn.execute(f"SELECT {rec_cols} FROM recovery ORDER BY id"):
         parts.append("|".join("" if v is None else str(v) for v in r))
     wk_cols = (
         "id,user_id,source,external_id,sport_type,source_sport_raw,start_at,end_at,"
-        "tz_name,day_key,duration_s,kcal_active,kcal_total,avg_hr_bpm,max_hr_bpm,"
+        "tz_name,utc_offset,day_key,duration_s,kcal_active,kcal_total,avg_hr_bpm,max_hr_bpm,"
         "strain,distance_m,hr_zones_json,session_group_id,dedupe_hash,raw_ref"
     )
     for r in conn.execute(f"SELECT {wk_cols} FROM workout ORDER BY id"):
