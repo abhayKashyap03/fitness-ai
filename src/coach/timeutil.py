@@ -11,7 +11,7 @@ DECISIONS_NEEDED.md D1. We store the offset string as the ``tz_name`` fallback.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 
 def parse_instant(iso: str) -> datetime:
@@ -24,14 +24,14 @@ def parse_instant(iso: str) -> datetime:
         s = s[:-1] + "+00:00"
     dt = datetime.fromisoformat(s)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def parse_offset(offset: str | None) -> timezone:
     """Parse a WHOOP offset string (``-05:00`` / ``+01:00`` / ``Z``) to a tzinfo."""
     if not offset or offset in {"Z", "+00:00", "-00:00"}:
-        return timezone.utc
+        return UTC
     sign = 1 if offset[0] == "+" else -1
     hh, mm = offset[1:].split(":")
     return timezone(sign * timedelta(hours=int(hh), minutes=int(mm)))
@@ -39,7 +39,7 @@ def parse_offset(offset: str | None) -> timezone:
 
 def to_utc_iso(dt: datetime) -> str:
     """Serialize an aware datetime to a UTC ISO-8601 string with ``+00:00``."""
-    return dt.astimezone(timezone.utc).isoformat()
+    return dt.astimezone(UTC).isoformat()
 
 
 def day_key(instant_iso: str, offset: str | None) -> str:

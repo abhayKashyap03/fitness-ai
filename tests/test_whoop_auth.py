@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -14,7 +14,7 @@ from coach.adapters.whoop.auth import (
     WhoopOAuth,
 )
 
-NOW = datetime(2026, 7, 18, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 18, 12, 0, 0, tzinfo=UTC)
 
 
 def _oauth(handler) -> WhoopOAuth:

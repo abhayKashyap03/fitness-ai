@@ -80,7 +80,7 @@ fi
 if command -v python3 >/dev/null 2>&1; then
   echo "  ✅ $(python3 --version)"
 else
-  echo "  ⚠️  python3 not found — install Python 3.11+ before the run"
+  echo "  ⚠️  python3 not found — install Python 3.14 before the run"
 fi
 
 echo ""

@@ -12,11 +12,11 @@ import hashlib
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def payload_hash(source: str, external_id: str | None, payload_json: str) -> str:

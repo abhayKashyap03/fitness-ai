@@ -3,9 +3,8 @@ name = "coach"
 version = "0.1.0"
 description = "Unified AI Health & Fitness Coach — grounded, single-user, n=1"
 readme = "README.md"
-# NOTE: CLAUDE.md §3 specifies Python 3.11+. Only 3.10 was available on the
-# build machine; code is kept 3.10-compatible. See docs/adr/0003-runtime-and-tooling.md.
-requires-python = ">=3.10"
+# Python 3.14 (satisfies CLAUDE.md §3's 3.11+ floor). See ADR-0003.
+requires-python = ">=3.14"
 dependencies = [
     "httpx>=0.27",
     "python-dotenv>=1.0",
@@ -36,7 +35,7 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-target-version = "py310"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -48,6 +47,6 @@ addopts = "-q"
 filterwarnings = ["error"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.14"
 warn_unused_ignores = true
 ignore_missing_imports = true
