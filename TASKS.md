@@ -148,7 +148,7 @@ load-bearing for the coach.
 **Done when:** `coach status --date YYYY-MM-DD` prints a complete daily picture
 with explicit nulls for missing data. This is the "single circle" view.
 
-### T3.2 — Trend functions
+### [x] T3.2 — Trend functions
 Smoothed weight trend (EWMA), HRV baseline + deviation, rolling averages for
 recovery and strain. All pure, all unit-tested, all with explicit minimum-data
 requirements (**return "insufficient data," never a misleading number**).
