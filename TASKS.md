@@ -12,7 +12,7 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 Do these **before** writing implementation code. They're the highest-thinking,
 lowest-token work and everything downstream depends on them.
 
-### T0.1 — Design the `food` canonical shape 🔒
+### [x] T0.1 — Design the `food` canonical shape 🔒
 Design and add to `schema/` a canonical table for nutrition entries.
 
 Must handle: individual food entries **and** daily rollups; missing/partial
@@ -28,7 +28,7 @@ These must be distinguishable — the coach's advice depends on it.
 **Done when:** DDL written, an ADR explains the entry-vs-rollup decision, and a
 `food_daily` view returns per-day totals.
 
-### T0.2 — Design the `weight` / body-composition canonical shape 🔒
+### [x] T0.2 — Design the `weight` / body-composition canonical shape 🔒
 Simpler. Handles: scale weight, body fat %, lean mass; multiple sources;
 multiple readings per day (which wins? — recommend: keep all rows, resolve at
 read time, consistent with §2.3).
@@ -37,7 +37,7 @@ read time, consistent with §2.3).
 (exponentially-weighted moving average is the standard approach for cut/bulk
 work — raw daily weight is too noisy to steer on).
 
-### T0.3 — Write ADR-0001 documenting the source-row provenance pattern
+### [x] T0.3 — Write ADR-0001 documenting the source-row provenance pattern
 Capture *why* sibling rows + read-time resolution beats merge-on-write, and why
 objective measurements are stored separately from composite scores. This is the
 keystone pattern; future-you needs the reasoning.

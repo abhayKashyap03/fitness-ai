@@ -1,21 +1,12 @@
 -- ============================================================
---  Canonical Schema — DRAFT v0.1
---  Unified AI Health & Fitness Coach
---  Scope: recovery + workout (the WHOOP vertical slice)
---  Store: SQLite. Everything derives from raw_events.
--- ============================================================
+--  Migration 0001 — base canonical schema (WHOOP vertical slice)
+--  Executable mirror of schema/canonical_schema_v0.1.sql.
+--  See that file for the fully-annotated design rationale.
 --
---  CONVENTIONS (apply to every canonical table)
---  * user_id on every row (always 1 today; multi-tenancy insurance).
---  * source  = which adapter produced the row. Provenance is first-class.
---  * raw_ref = FK back to the immutable raw payload it was derived from,
---              so canonical is fully REGENERABLE when logic improves.
---  * Times: UTC ISO-8601 text (SQLite has no native datetime) PLUS the
---           local tz name PLUS a day_key, so travel never corrupts days.
---  * SQLite has no ENUM -> TEXT + CHECK constraints.
---  * Canonical rows are DISPOSABLE. Raw is SACRED. Never edit raw.
+--  Migrations are the EXECUTABLE source of truth. The migration
+--  runner (src/coach/store) applies files in this directory in
+--  ascending numeric order and records them in schema_version.
 -- ============================================================
-
 
 -- ------------------------------------------------------------
 -- 1. RAW STORE — append-only, immutable, keep forever
@@ -36,19 +27,8 @@ CREATE TABLE raw_events (
   UNIQUE (source, external_id, payload_hash)
 );
 
--- Optional high-frequency companion for LOCAL recompute (RR intervals, HR stream).
--- Deferred until the BLE read is proven, but reserving the shape:
--- CREATE TABLE raw_signals (
---   id TEXT PRIMARY KEY, user_id INTEGER, source TEXT,
---   signal_type TEXT,            -- 'rr_interval','hr','accel'...
---   t_utc TEXT, value REAL, raw_ref TEXT REFERENCES raw_events(id)
--- );
-
-
 -- ------------------------------------------------------------
--- 2. RECOVERY — one row per (user, day, source)
---    Dual-adapter answer: official + self-computed are SIBLING ROWS,
---    same shape, distinguished by `source` + `score_method`.
+-- 2. RECOVERY — one row per (user, day, source, score_method)
 -- ------------------------------------------------------------
 CREATE TABLE recovery (
   id             TEXT PRIMARY KEY,
@@ -60,32 +40,28 @@ CREATE TABLE recovery (
   measured_at    TEXT,                      -- UTC ISO-8601 (usually last night's sleep end)
   tz_name        TEXT,                      -- IANA, e.g. 'America/New_York' (travel-proof)
 
-  -- OBJECTIVE measurements — comparable ACROSS sources -----------------
-  hrv_rmssd_ms   REAL,                      -- the honest cross-source currency
+  -- OBJECTIVE measurements — comparable ACROSS sources
+  hrv_rmssd_ms   REAL,
   resting_hr_bpm REAL,
   spo2_pct       REAL,
   skin_temp_c    REAL,
   resp_rate_bpm  REAL,
 
-  -- DERIVED composite score — NOT comparable across sources -----------
-  score          REAL,                      -- 0-100 (or source scale)
+  -- DERIVED composite score — NOT comparable across sources
+  score          REAL,
   score_scale    TEXT,                      -- 'whoop_0_100','computed_0_100'
   score_method   TEXT,                      -- 'whoop_proprietary','rmssd_baseline_v1'...
-  is_official    INTEGER NOT NULL DEFAULT 0,-- 1 = vendor score, 0 = self-computed
+  is_official    INTEGER NOT NULL DEFAULT 0,
 
-  -- lineage -----------------------------------------------------------
   raw_ref        TEXT REFERENCES raw_events(id),
-  derived_at     TEXT NOT NULL,             -- when this canonical row was computed
+  derived_at     TEXT NOT NULL,
   schema_version INTEGER NOT NULL DEFAULT 1,
 
   UNIQUE (user_id, day_key, source, score_method)
 );
 
-
 -- ------------------------------------------------------------
 -- 3. WORKOUT — one row per (source, detected session)
---    session_group_id links duplicates of the SAME real workout
---    arriving from multiple sources, so compute counts it ONCE.
 -- ------------------------------------------------------------
 CREATE TABLE workout (
   id               TEXT PRIMARY KEY,
@@ -95,8 +71,7 @@ CREATE TABLE workout (
                       'strava','garmin','manual')),
   external_id      TEXT,
 
-  sport_type       TEXT NOT NULL,           -- MY canonical enum: 'strength','run','cycle',
-                                            -- 'walk','hiit','swim','other'... adapters map into this
+  sport_type       TEXT NOT NULL,           -- canonical enum; adapters map into this
   source_sport_raw TEXT,                    -- what the source called it (debug/audit)
 
   start_at         TEXT NOT NULL,           -- UTC ISO-8601
@@ -105,16 +80,14 @@ CREATE TABLE workout (
   day_key          TEXT NOT NULL,           -- local date the session belongs to
   duration_s       INTEGER,
 
-  -- metrics (all nullable; sources vary) ------------------------------
   kcal_active      REAL,
   kcal_total       REAL,
   avg_hr_bpm       REAL,
   max_hr_bpm       REAL,
   strain           REAL,                    -- WHOOP 0-21 (source-specific, nullable)
   distance_m       REAL,
-  hr_zones_json    TEXT,                    -- time-in-zone blob
+  hr_zones_json    TEXT,
 
-  -- dedupe / grouping -------------------------------------------------
   session_group_id TEXT,                    -- same real workout across sources
   dedupe_hash      TEXT,                    -- hash(user, start-time bucket, sport_type)
 
@@ -123,18 +96,10 @@ CREATE TABLE workout (
   schema_version   INTEGER NOT NULL DEFAULT 1
 );
 
--- Strength detail (sets/reps/load) is a DIFFERENT shape — reserve a child
--- table for when manual / Hevy logging lands:
--- CREATE TABLE workout_set (
---   id TEXT PRIMARY KEY, workout_id TEXT REFERENCES workout(id),
---   exercise TEXT, set_no INTEGER, reps INTEGER, load_kg REAL, rpe REAL
--- );
-
-
 -- ------------------------------------------------------------
--- 4. RESOLVER — the payoff. Precedence is a RULE, not schema.
---    Picks ONE authoritative recovery per day. To swap adapters
---    at membership end, reorder the CASE. That's the whole migration.
+-- 4. RESOLVER — precedence is a RULE, not schema.
+--    To swap adapters at membership end, reorder the CASE.
+--    (Single, obvious, documented place — see ADR-0001.)
 -- ------------------------------------------------------------
 CREATE VIEW recovery_resolved AS
 WITH ranked AS (
@@ -157,16 +122,3 @@ CREATE INDEX idx_recovery_day  ON recovery (user_id, day_key);
 CREATE INDEX idx_workout_day   ON workout  (user_id, day_key);
 CREATE INDEX idx_workout_group ON workout  (session_group_id);
 CREATE INDEX idx_raw_lookup    ON raw_events (source, record_type, recorded_at);
-
--- ============================================================
---  NOTE: this file is the ANNOTATED design reference for the base
---  slice. The EXECUTABLE source of truth is schema/migrations/*.sql,
---  applied in order by the migration runner (src/coach/store).
---
---  Phase-0 additions (food, weight) are NOT duplicated here; see:
---    * schema/migrations/0002_food.sql   — food_entry + food_daily
---        (design: docs/adr/0002-food-entry-vs-rollup.md)
---    * schema/migrations/0003_weight.sql — weight_measurement +
---        weight_resolved_daily + weight_trend (EWMA)
---  Provenance/resolution rationale: docs/adr/0001-source-row-provenance.md
--- ============================================================
