@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from coach.timeutil import day_key, offset_tz_name, parse_instant, parse_offset
+from coach.timeutil import day_key, normalize_offset, parse_instant, parse_offset
 
 
 def test_parse_instant_handles_z_and_offset():
@@ -34,6 +34,9 @@ def test_parse_offset_variants():
     assert parse_offset("+01:30").utcoffset(None).total_seconds() == 5400
 
 
-def test_offset_tz_name_fallback():
-    assert offset_tz_name(None) == "UTC"
-    assert offset_tz_name("-04:00") == "-04:00"
+def test_normalize_offset():
+    # missing offset stays absent (§2.7); Z canonicalizes; real offset passes through
+    assert normalize_offset(None) is None
+    assert normalize_offset("") is None
+    assert normalize_offset("Z") == "+00:00"
+    assert normalize_offset("-04:00") == "-04:00"

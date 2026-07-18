@@ -5,8 +5,10 @@ Every instant is a UTC ISO-8601 string; the local day it belongs to
 from a naive local clock. Day-boundary bugs are an expected failure class here,
 so this logic is small, pure, and heavily tested.
 
-WHOOP supplies a UTC *offset* (e.g. ``-05:00``), not an IANA zone name — see
-DECISIONS_NEEDED.md D1. We store the offset string as the ``tz_name`` fallback.
+WHOOP supplies a UTC *offset* (e.g. ``-05:00``), not an IANA zone name. Per
+CLAUDE.md §2.6 (D1) the offset is stored in its own ``utc_offset`` column and
+``tz_name`` stays strictly IANA (NULL when unknown) — never overloaded with an
+offset. ``day_key`` is derived from instant + offset and is exact regardless.
 """
 
 from __future__ import annotations
@@ -53,10 +55,14 @@ def day_key(instant_iso: str, offset: str | None) -> str:
     return dt.date().isoformat()
 
 
-def offset_tz_name(offset: str | None) -> str:
-    """The value we store in ``tz_name`` for offset-only sources."""
+def normalize_offset(offset: str | None) -> str | None:
+    """Canonicalize a UTC-offset string for the ``utc_offset`` column.
+
+    ``Z`` becomes ``+00:00``; a missing offset stays ``None`` (absence is
+    absence, §2.7). Never returns an IANA name — that column is ``tz_name``.
+    """
     if not offset:
-        return "UTC"
+        return None
     if offset == "Z":
         return "+00:00"
     return offset

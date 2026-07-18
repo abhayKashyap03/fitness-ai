@@ -73,10 +73,14 @@ def test_normalize_populates_canonical(migrated_conn):
     assert counts["workout"] == 2
     n_rec = migrated_conn.execute("SELECT COUNT(*) FROM recovery").fetchone()[0]
     assert n_rec == 2
-    # recovery day_key uses the cycle's offset
-    row = migrated_conn.execute("SELECT day_key, tz_name FROM recovery WHERE score=66").fetchone()
+    # recovery day_key uses the cycle's offset; offset stored in utc_offset,
+    # tz_name stays NULL (IANA-only) per §2.6
+    row = migrated_conn.execute(
+        "SELECT day_key, tz_name, utc_offset FROM recovery WHERE score=66"
+    ).fetchone()
     assert row["day_key"] == "2026-07-10"
-    assert row["tz_name"] == "-04:00"
+    assert row["utc_offset"] == "-04:00"
+    assert row["tz_name"] is None
 
 
 def test_normalize_idempotent_and_rebuild_identical(migrated_conn):
