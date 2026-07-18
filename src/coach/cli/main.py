@@ -149,6 +149,57 @@ def _cmd_normalize(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- status ----------------------------------------------------------------
+
+
+def _fmt(v: object, unit: str = "") -> str:
+    return "—" if v is None else f"{v}{unit}"
+
+
+def _cmd_status(settings: Settings, args: argparse.Namespace) -> int:
+    from ..compute.daily import daily_status
+
+    conn = db.connect(settings.db_path)
+    try:
+        s = daily_status(conn, args.date, user_id=settings.user_id)
+    finally:
+        conn.close()
+
+    print(f"── Daily status · {s.day_key} ──")
+    if s.recovery:
+        r = s.recovery
+        print(
+            f"  recovery [{r.source}]: score={_fmt(r.score)} "
+            f"hrv={_fmt(r.hrv_rmssd_ms, 'ms')} rhr={_fmt(r.resting_hr_bpm, 'bpm')}"
+        )
+    else:
+        print("  recovery: — (none)")
+    if s.weight:
+        w = s.weight
+        print(f"  weight [{w.source}]: {_fmt(w.weight_kg, 'kg')} (trend {_fmt(w.trend_kg, 'kg')})")
+    else:
+        print("  weight: — (none)")
+    f = s.food
+    if not f.logged:
+        print("  food: NOT LOGGED (not the same as zero)")
+    elif f.is_fast:
+        print("  food: FAST — 0 kcal (declared)")
+    else:
+        flag = "" if f.is_complete else "  [incomplete]"
+        print(
+            f"  food [{f.source}]: {_fmt(f.kcal, ' kcal')}  "
+            f"P{_fmt(f.protein_g)} C{_fmt(f.carbs_g)} F{_fmt(f.fat_g)}{flag}"
+        )
+    t = s.training
+    print(
+        f"  training: {t.sessions} session(s) "
+        f"kcal={_fmt(t.kcal_active)} dur={_fmt(t.duration_s, 's')} strain={_fmt(t.strain)}"
+    )
+    for n in s.notes:
+        print(f"    · {n}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="coach", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -178,6 +229,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--tolerance", type=int, default=300, help="workout dedup window in seconds"
     )
     p_norm.set_defaults(func=_cmd_normalize)
+
+    p_status = sub.add_parser("status", help="daily rollup for a date")
+    p_status.add_argument("--date", required=True, help="day_key (YYYY-MM-DD)")
+    p_status.set_defaults(func=_cmd_status)
 
     return parser
 

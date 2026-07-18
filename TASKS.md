@@ -139,7 +139,7 @@ with no data mutation.
 
 ## Phase 3 — Compute layer (deterministic math only)
 
-### T3.1 — Daily rollups
+### [x] T3.1 — Daily rollups
 Per `day_key`: calories in (from food), calories out (active + basal estimate),
 macro totals and adherence vs targets, recovery, weight, workout summary.
 **Handle missing data explicitly** — "not logged" ≠ zero. This distinction is
