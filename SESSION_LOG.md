@@ -184,3 +184,26 @@ DB (schema v4). PR opened for review (I do not merge).
 Also noting for the record (no action): an earlier session edited `~/.zshrc`
 (python alias) — §8.1 now says stay inside the repo and let the human make
 environment changes. Future sessions will comply.
+
+---
+
+## Session 2026-07-18 (d) — live WHOOP ingest works; fix --since date format
+
+First live API contact. Root cause of the `GET /v2/recovery -> 404`: the CLI
+passed `--since` verbatim and **WHOOP v2 404s on a bare `YYYY-MM-DD`** — it needs
+an RFC3339 datetime. Not a base-URL, scope, or routing issue (verified all
+endpoints 200 with a bounded probe; scope includes read:recovery).
+
+Fix (branch `fix/whoop-ingest-date-format`): `WhoopClient._window` now widens a
+bare date to `T00:00:00.000Z`; full datetimes pass through. +2 tests.
+
+**§10 first-contact reconciliation PASSED:** real WHOOP v2 payload field names
+match the synthetic fixtures (`hrv_rmssd_milli`, `resting_heart_rate`,
+`recovery_score`, `created_at`, cycle `timezone_offset`). Ran live
+`ingest --since 2026-07-16T00:00:00.000Z` → recovery/cycle/sleep/body ingested;
+`normalize` produced real canonical recovery with `utc_offset=-04:00`, `tz_name`
+NULL (D1 working on live data). Removed an uncommitted debug hack from client.py.
+Gitignored `postman/` `.postman/` (can embed tokens).
+
+Note: the D1/CLAUDE-alignment work (PR #2) is still open/unmerged; this fix
+branches off main independently.

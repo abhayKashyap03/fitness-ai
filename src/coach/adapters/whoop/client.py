@@ -101,8 +101,23 @@ class WhoopClient:
             params = dict(params, nextToken=token)
 
     @staticmethod
-    def _window(start: str | None, end: str | None) -> dict:
+    def _to_rfc3339(value: str | None) -> str | None:
+        """Coerce a start/end filter to the RFC3339 datetime WHOOP requires.
+
+        WHOOP v2 returns **404** (not 400) for a bare ``YYYY-MM-DD`` — the value
+        must carry a time. A bare date is widened to start-of-day UTC; anything
+        already carrying a ``T`` is passed through untouched.
+        """
+        if value is None:
+            return None
+        v = value.strip()
+        return v if "T" in v else f"{v}T00:00:00.000Z"
+
+    @classmethod
+    def _window(cls, start: str | None, end: str | None) -> dict:
         p: dict[str, str] = {}
+        start = cls._to_rfc3339(start)
+        end = cls._to_rfc3339(end)
         if start:
             p["start"] = start
         if end:
