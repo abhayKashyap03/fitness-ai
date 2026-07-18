@@ -147,8 +147,7 @@ class WhoopOAuth:
         if resp.status_code >= 400:
             # Never echo the request body (contains the secret).
             raise ReauthRequired(
-                f"WHOOP token endpoint returned {resp.status_code}: "
-                f"{resp.text[:200]}"
+                f"WHOOP token endpoint returned {resp.status_code}: {resp.text[:200]}"
             )
         return resp.json()
 
@@ -177,15 +176,11 @@ class WhoopOAuth:
 
     # ---- the one call the API client uses ----------------------------------
 
-    def valid_access_token(
-        self, store: TokenStore, now: datetime | None = None
-    ) -> str:
+    def valid_access_token(self, store: TokenStore, now: datetime | None = None) -> str:
         """Return a non-expired access token, refreshing + persisting if needed."""
         tokens = store.load()
         if tokens is None:
-            raise ReauthRequired(
-                "No stored WHOOP token — run `coach auth whoop` first."
-            )
+            raise ReauthRequired("No stored WHOOP token — run `coach auth whoop` first.")
         if tokens.is_expired(now):
             tokens = self.refresh(tokens, now)
             store.save(tokens)
