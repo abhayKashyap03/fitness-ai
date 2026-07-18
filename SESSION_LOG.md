@@ -49,6 +49,24 @@ Target: Phase 0 + 1 + 2 complete; Phase 3 stretch. No Phase 4. No hardware tasks
   sample data.
 - Unverified: nothing else yet (Phase 1+ not started).
 
+**Phase 1 — DONE (T1.1, T1.2, T1.3)**
+- `pyproject.toml` (setuptools src-layout, ruff+pytest+mypy config), `.venv`
+  (Python 3.10), editable install. `README.md` written.
+- `src/coach/config.py` — typed frozen `Settings`, fail-loud `ConfigError`
+  naming the missing var, secrets `repr=False`, `require_whoop()` gate.
+- `src/coach/paths.py` — repo-root/migrations-dir resolution.
+- `src/coach/store/db.py` — connection + numbered migration runner + version
+  table (no Alembic). `src/coach/cli/main.py` — `coach db init` / `db status`.
+- **Verified:** `coach db init` creates DB from scratch, idempotent on re-run,
+  `db status` reports version. `ruff check`, `ruff format --check`, and `pytest`
+  (20 tests) all green.
+- ADR-0003 documents the Python-3.10 deviation + tooling choices.
+
+### Verified vs unverified (running)
+- Verified: Phase 0 views; Phase 1 config, migration runner, CLI db commands;
+  20 unit tests green; ruff clean.
+- Unverified: Phase 2 (WHOOP) not started.
+
 ### Next
-- Phase 1: scaffold pyproject/ruff/pytest, config module, migration runner +
-  `coach db init/status`, then pytest tests for the Phase 0 views.
+- Phase 2: WHOOP OAuth (build + mock-test, live pending), typed API client vs
+  fixtures, raw ingestion (idempotent), normalizers, backfill, dedup, resolver.

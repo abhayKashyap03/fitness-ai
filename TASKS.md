@@ -46,7 +46,7 @@ keystone pattern; future-you needs the reasoning.
 
 ## Phase 1 — Repo foundation
 
-### T1.1 — Scaffold the project
+### [x] T1.1 — Scaffold the project
 Create the structure from `CLAUDE.md` §6. Set up `pyproject.toml`, dependency
 management, `ruff` config, `pytest` config, `.gitignore` (**`.env` must be
 ignored in the very first commit**), and a `README.md` (what it is, how to set
@@ -54,7 +54,7 @@ up, how to run).
 
 **Done when:** `pytest` runs green (zero tests is fine), `ruff check` passes.
 
-### T1.2 — Config & secrets handling
+### [x] T1.2 — Config & secrets handling
 A small config module loading from `.env` → typed settings object. Fail loudly
 with a clear message if a required var is missing. Never log secret values.
 Write `.env.example` with every var documented and **no real values**.
@@ -62,7 +62,7 @@ Write `.env.example` with every var documented and **no real values**.
 **Done when:** importing config with a missing required var raises a clear,
 actionable error naming the variable.
 
-### T1.3 — Database bootstrap + migrations
+### [x] T1.3 — Database bootstrap + migrations
 Apply `schema/canonical_schema_v0.1.sql` plus the Phase 0 additions. Implement a
 minimal, explicit migration mechanism (a numbered `schema/migrations/` directory
 and a `schema_version` table is plenty — **do not add Alembic**).
