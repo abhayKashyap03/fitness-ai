@@ -193,6 +193,9 @@ are tested against **recorded fixtures** in `tests/fixtures/`, never live calls.
 **ADRs:** when you make a non-obvious technical call, write a short ADR in
 `docs/adr/`. Format: Context / Decision / Consequences. Keep it to a page.
 
+**DevOps:** *Always* work on feature branch and create PRs. I will merge them 
+myself after reviewing. *Never* directly work on and push to the `main` branch.
+
 ---
 
 ## 7. Working autonomously — protocol
