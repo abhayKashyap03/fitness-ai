@@ -164,7 +164,7 @@ comparison. Must degrade gracefully with sparse logging.
 **Done when:** given a synthetic dataset with a known true TDEE, the estimate
 converges within a documented tolerance. Write an ADR on the method chosen.
 
-### T3.4 — Calorie source precedence ⏭️🔒
+### [~] T3.4 — Calorie source precedence ⏭️🔒 (FLAGGED — see DECISIONS_NEEDED D2)
 Decide and document which source wins for calories-burned when WHOOP, Apple
 Watch, and gym equipment disagree. If it isn't obvious, this is a legitimate
 `DECISIONS_NEEDED.md` entry — flag it and move on rather than guessing.

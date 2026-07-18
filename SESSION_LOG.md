@@ -99,6 +99,43 @@ Target: Phase 0 + 1 + 2 complete; Phase 3 stretch. No Phase 4. No hardware tasks
 - Unverified (needs you): live WHOOP OAuth + live ingest against the real API;
   first-contact reconciliation of synthetic fixtures vs real payload shapes.
 
-### Next
-- Phase 3 (compute): daily rollups (`coach status`), trend functions (EWMA/HRV
-  baseline), adaptive TDEE. All deterministic, unit-tested, explicit nulls.
+**Phase 3 — DONE except T3.4 flagged (stretch goal, exceeded)**
+- T3.1 compute/daily.py + `coach status --date` — single-circle rollup; "not
+  logged" ≠ zero; workouts counted once per session_group_id. 7 tests.
+- T3.2 compute/trends.py — ewma_series, rolling_mean, baseline_deviation; all
+  return Insufficient below explicit minimums. 8 tests vs hand calcs.
+- T3.3 compute/tdee.py + `coach tdee` — adaptive TDEE (energy balance, EWMA
+  trend, ignores wearable kcal). ADR-0005. Synthetic known-TDEE convergence
+  within ±25 kcal + DB-backed window test. 5 tests.
+- T3.4 (⏭️🔒) NOT coded — flagged as DECISIONS_NEEDED D2 with recommendation.
+  No live conflict exists (WHOOP is the only calorie source today), so guessing
+  a precedence would have been premature. Per T3.4's own instruction.
+
+### Final state (session end)
+- **Target met and exceeded:** Phase 0, 1, 2 complete + Phase 3 (T3.1–T3.3).
+  Phase 4 NOT started (per instructions). No hardware/BLE work attempted.
+- **79 tests green; ruff + ruff format + mypy all clean.** Repo clean, every
+  task committed separately. `.env` never staged (checked each commit).
+- CLI: `coach db init|status`, `auth whoop`, `ingest whoop`, `normalize
+  [--rebuild]`, `status --date`, `tdee --end --window`.
+
+### What the human should verify FIRST (unchanged, still the gating items)
+1. `source .venv/bin/activate && coach db init` → schema v3.
+2. `coach auth whoop` → real browser login (the ONLY step I cannot verify).
+3. `coach ingest whoop --since 2026-06-01 && coach normalize && coach status
+   --date <a-day>` → sanity-check against synthetic-fixture assumptions.
+4. Answer DECISIONS_NEEDED **D1** (WHOOP offset vs IANA) and **D2** (calorie
+   precedence). Both have recommendations; neither blocks current correctness.
+
+### Known limitations / first-contact risks
+- WHOOP fixtures are SYNTHETIC (labeled). First real payloads may differ in field
+  names/nesting — that's an expected reconciliation in normalize/whoop.py +
+  adapters/whoop/client.py, not a rewrite.
+- Python is 3.10 (no 3.11 on machine) — ADR-0003. Bump the floor when available.
+
+### Next (for a future session)
+- Live-verify WHOOP end to end once logged in; re-record real fixtures.
+- Phase 4 (coach layer) — design-heavy, needs human input (tool contract +
+  grounding harness). Deliberately not started.
+- Food/weight ingestion adapters (HealthKit export path) once the human sets one
+  up — schemas already exist (migrations 0002/0003).

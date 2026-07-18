@@ -31,3 +31,31 @@ it ambiguous).
 NOT threaten correctness today. It only affects future features that need the
 named zone (e.g. "what local time do you usually train"). Flagging per §2.6's
 status as a core principle.
+
+---
+
+## D2 — Calories-burned source precedence (T3.4) 🔒
+
+**Blocked / deferred:** When WHOOP, Apple Watch, and gym equipment all report
+calories for overlapping activity, which wins? These disagree 30%+ and this is a
+one-way-door policy that shapes the TDEE "calories out" comparison.
+
+**Not urgent yet:** today WHOOP is the *only* calorie source, so there is no live
+conflict — `daily_status` already counts each workout once per `session_group_id`
+using a documented source rank (`whoop_api > whoop_ble > other`). Nothing is
+being double-counted or silently dropped now.
+
+**Recommendation (for when a 2nd source lands):**
+1. **(Recommended)** Do NOT let wearable "calories out" drive anything important.
+   The adaptive TDEE (ADR-0005) already ignores wearable kcal by design — weight
+   trend + intake is the trustworthy signal. Treat all wearable calorie numbers
+   as *advisory only*, and when sources conflict, display the range rather than
+   pick a winner.
+2. If a single number is required for a per-workout view, prefer the
+   chest/strap-based estimate (WHOOP) over wrist optical (Apple Watch) over
+   machine estimates, in that order — but label it clearly as approximate.
+
+**Why it matters:** picking a precedence and baking it into compute is hard to
+unwind. Since it doesn't affect correctness today and genuinely depends on your
+judgment about which device you trust, I did not guess — flagging per T3.4's own
+instruction.
