@@ -77,6 +77,29 @@ def test_non_retryable_4xx_raises_immediately():
     assert calls["n"] == 1  # no retry on 403
 
 
+def test_bare_date_start_widened_to_rfc3339():
+    # WHOOP 404s on a bare YYYY-MM-DD; the client must send a full datetime
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["start"] = req.url.params.get("start")
+        return httpx.Response(200, json={"records": [], "next_token": None})
+
+    _client(handler).get_recovery("2026-07-16")
+    assert seen["start"] == "2026-07-16T00:00:00.000Z"
+
+
+def test_full_datetime_passed_through():
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["start"] = req.url.params.get("start")
+        return httpx.Response(200, json={"records": [], "next_token": None})
+
+    _client(handler).get_recovery("2026-07-16T09:30:00.000Z")
+    assert seen["start"] == "2026-07-16T09:30:00.000Z"
+
+
 def test_body_measurement_single_object():
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_load("body_measurement.json"))

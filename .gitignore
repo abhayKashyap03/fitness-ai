@@ -7,6 +7,10 @@
 tokens.json
 .credentials/
 
+# Postman / API-testing collections — can embed bearer tokens; keep them local
+.postman/
+postman/
+
 # --- Local data (health data stays local) --------------------
 data/
 *.db
