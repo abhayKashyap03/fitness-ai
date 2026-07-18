@@ -25,3 +25,12 @@ def repo_root() -> Path:
 
 def migrations_dir() -> Path:
     return repo_root() / "schema" / "migrations"
+
+
+def credentials_dir() -> Path:
+    """Gitignored directory for local secrets (tokens). Never committed."""
+    return repo_root() / ".credentials"
+
+
+def whoop_token_path() -> Path:
+    return credentials_dir() / "whoop_token.json"

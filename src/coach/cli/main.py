@@ -11,7 +11,9 @@ import logging
 import sys
 from collections.abc import Sequence
 
+from ..adapters.whoop.auth import ReauthRequired, TokenStore, WhoopOAuth
 from ..config import ConfigError, Settings, load_settings
+from ..paths import whoop_token_path
 from ..store import db
 
 
@@ -62,6 +64,35 @@ def _cmd_db_status(settings: Settings, _args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- auth subcommands ------------------------------------------------------
+
+
+def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
+    from ..adapters.whoop.flow import run_login  # local: touches browser/socket
+
+    try:
+        settings.require_whoop()
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    oauth = WhoopOAuth(
+        settings.whoop_client_id,
+        settings.whoop_client_secret,
+        settings.whoop_redirect_uri,
+    )
+    store = TokenStore(whoop_token_path())
+    try:
+        tokens = run_login(oauth, store, settings.whoop_redirect_uri)
+    except (ReauthRequired, RuntimeError) as exc:
+        print(f"WHOOP authorization failed: {exc}", file=sys.stderr)
+        return 1
+    # never print the token itself
+    print("WHOOP authorized. Token stored at", store.path)
+    print(f"  scopes: {tokens.scope or '(none reported)'}")
+    print(f"  expires: {tokens.expires_at.isoformat()}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="coach", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -72,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=_cmd_db_init)
     p_status = db_sub.add_parser("status", help="report current schema version")
     p_status.set_defaults(func=_cmd_db_status)
+
+    p_auth = sub.add_parser("auth", help="authorize a data source")
+    auth_sub = p_auth.add_subparsers(dest="auth_command", required=True)
+    p_whoop = auth_sub.add_parser("whoop", help="run the WHOOP OAuth login")
+    p_whoop.set_defaults(func=_cmd_auth_whoop)
 
     return parser
 
