@@ -12,7 +12,10 @@ import sys
 from collections.abc import Sequence
 
 from ..adapters.whoop.auth import ReauthRequired, TokenStore, WhoopOAuth
+from ..adapters.whoop.client import WhoopClient
+from ..adapters.whoop.ingest import ingest_whoop
 from ..config import ConfigError, Settings, load_settings
+from ..normalize.runner import normalize_all
 from ..paths import whoop_token_path
 from ..store import db
 
@@ -93,6 +96,59 @@ def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- ingest / normalize ----------------------------------------------------
+
+
+def _whoop_client(settings: Settings) -> WhoopClient:
+    oauth = WhoopOAuth(
+        settings.whoop_client_id,
+        settings.whoop_client_secret,
+        settings.whoop_redirect_uri,
+    )
+    store = TokenStore(whoop_token_path())
+    return WhoopClient(lambda: oauth.valid_access_token(store))
+
+
+def _cmd_ingest_whoop(settings: Settings, args: argparse.Namespace) -> int:
+    try:
+        settings.require_whoop()
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    conn = db.connect(settings.db_path)
+    try:
+        client = _whoop_client(settings)
+        result = ingest_whoop(
+            conn, client, since=args.since, until=args.until, user_id=settings.user_id
+        )
+    except ReauthRequired as exc:
+        print(f"WHOOP auth needed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    for rtype, counts in result.items():
+        print(f"  {rtype:18} inserted={counts['inserted']:4d} skipped={counts['skipped']:4d}")
+    return 0
+
+
+def _cmd_normalize(settings: Settings, args: argparse.Namespace) -> int:
+    conn = db.connect(settings.db_path)
+    try:
+        counts = normalize_all(
+            conn,
+            user_id=settings.user_id,
+            rebuild=args.rebuild,
+            tolerance_s=args.tolerance,
+        )
+    finally:
+        conn.close()
+    mode = "rebuild" if args.rebuild else "incremental"
+    print(f"Normalized ({mode}):")
+    for k, v in counts.items():
+        print(f"  {k:16} {v}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="coach", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -108,6 +164,20 @@ def build_parser() -> argparse.ArgumentParser:
     auth_sub = p_auth.add_subparsers(dest="auth_command", required=True)
     p_whoop = auth_sub.add_parser("whoop", help="run the WHOOP OAuth login")
     p_whoop.set_defaults(func=_cmd_auth_whoop)
+
+    p_ingest = sub.add_parser("ingest", help="fetch a source into raw_events")
+    ingest_sub = p_ingest.add_subparsers(dest="ingest_command", required=True)
+    p_iw = ingest_sub.add_parser("whoop", help="ingest WHOOP data (verbatim, idempotent)")
+    p_iw.add_argument("--since", required=True, help="ISO date/datetime start of window")
+    p_iw.add_argument("--until", default=None, help="ISO date/datetime end (optional)")
+    p_iw.set_defaults(func=_cmd_ingest_whoop)
+
+    p_norm = sub.add_parser("normalize", help="derive canonical tables from raw")
+    p_norm.add_argument("--rebuild", action="store_true", help="drop + re-derive all")
+    p_norm.add_argument(
+        "--tolerance", type=int, default=300, help="workout dedup window in seconds"
+    )
+    p_norm.set_defaults(func=_cmd_normalize)
 
     return parser
 

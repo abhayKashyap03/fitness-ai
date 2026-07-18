@@ -67,6 +67,38 @@ Target: Phase 0 + 1 + 2 complete; Phase 3 stretch. No Phase 4. No hardware tasks
   20 unit tests green; ruff clean.
 - Unverified: Phase 2 (WHOOP) not started.
 
+**Phase 2 — DONE (T2.1–T2.7)**
+- T2.1 OAuth (auth.py + flow.py + `coach auth whoop`) — built, 9 mock tests,
+  **live login pending** (needs interactive WHOOP login; creds ARE in .env).
+- T2.2 client.py — v2 endpoints, next_token pagination, 429/5xx backoff, no
+  token leak. sport_map.py. timeutil.py (day_key from offset).
+- T2.3 ingest.py + `coach ingest whoop --since` — verbatim raw, idempotent
+  (payload_hash), proven by test. **Live fetch pending** (needs token).
+- T2.4 normalize/whoop.py pure parsers + runner.py + `coach normalize`.
+- T2.5 `--rebuild` — byte-identical canonical via deterministic ids +
+  `canonical_fingerprint` (excludes volatile derived_at). Test proves it.
+- T2.6 dedup.py — session_group_id grouping, tolerance configurable. ADR-0004.
+  Tests: 2-source→1 group, back-to-back→2, diff-sport→2.
+- T2.7 resolver — `recovery_resolved`; test proves precedence flip changes
+  winner with zero data mutation.
+- **Verified:** 59 tests green; ruff + ruff format + mypy clean. CLI subcommands
+  parse; `coach normalize` runs on empty DB.
+- **Flagged:** DECISIONS_NEEDED D1 — WHOOP gives UTC offset, not IANA zone;
+  day_key is still exact, tz_name stores the offset. Needs your call.
+
+### What the human should verify FIRST
+1. `source .venv/bin/activate` then `coach db init` — should reach schema v3.
+2. `coach auth whoop` — complete the real login (opens browser). This is the
+   only truly unverifiable-by-me step.
+3. Then `coach ingest whoop --since 2026-06-01` and `coach normalize`, and spot
+   check `sqlite3 data/coach.db "SELECT * FROM recovery_resolved LIMIT 5"`.
+4. Read DECISIONS_NEEDED.md D1 and pick an option.
+
+### Verified vs unverified (running)
+- Verified (offline): all Phase 0/1/2 logic, 59 tests, lint/type clean.
+- Unverified (needs you): live WHOOP OAuth + live ingest against the real API;
+  first-contact reconciliation of synthetic fixtures vs real payload shapes.
+
 ### Next
-- Phase 2: WHOOP OAuth (build + mock-test, live pending), typed API client vs
-  fixtures, raw ingestion (idempotent), normalizers, backfill, dedup, resolver.
+- Phase 3 (compute): daily rollups (`coach status`), trend functions (EWMA/HRV
+  baseline), adaptive TDEE. All deterministic, unit-tested, explicit nulls.

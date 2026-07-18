@@ -74,7 +74,7 @@ safe (idempotent); `coach db status` reports the current version.
 
 ## Phase 2 — WHOOP vertical slice (the core of the night)
 
-### T2.1 — WHOOP OAuth 2.0 flow
+### [x] T2.1 — WHOOP OAuth 2.0 flow
 Implement authorization-code flow. Tokens stored locally (in the DB or a
 gitignored file), auto-refresh on expiry, clear error when re-auth is needed.
 
@@ -84,14 +84,14 @@ not, build it fully, unit-test the token/refresh logic against mocks, and mark
 
 **Done when:** `coach auth whoop` completes a full login and persists a usable token.
 
-### T2.2 — WHOOP API client
+### [x] T2.2 — WHOOP API client
 Typed client for: recovery, cycles/strain, sleep, workouts, body measurements.
 Handle pagination, rate limits (~100 req/min — implement backoff), and transient
 5xx retry. Log requests without leaking tokens.
 
 **Done when:** each endpoint has a method, tested against fixtures.
 
-### T2.3 — Raw ingestion
+### [x] T2.3 — Raw ingestion
 `coach ingest whoop --since <date>` writes **verbatim** payloads to `raw_events`.
 Idempotent: re-running the same window creates no duplicates (that's what
 `payload_hash` is for). Record `ingested_at`, `recorded_at`, `external_id`.
@@ -99,7 +99,7 @@ Idempotent: re-running the same window creates no duplicates (that's what
 **Done when:** running the same ingest twice leaves the row count unchanged, and
 a test proves it.
 
-### T2.4 — Normalizers: raw → canonical
+### [x] T2.4 — Normalizers: raw → canonical
 Pure functions `raw_event -> canonical row(s)` for `recovery` and `workout`.
 No I/O inside them — that's what makes backfill trivially safe.
 
@@ -110,13 +110,13 @@ keeping the original in `source_sport_raw`.
 produces identical results (idempotent); unit tests cover each mapping including
 missing/null fields.
 
-### T2.5 — Backfill & regeneration
+### [x] T2.5 — Backfill & regeneration
 `coach normalize --rebuild` drops and fully re-derives canonical tables from raw.
 This is the payoff of §2.1 — prove it works now, while the data is small.
 
 **Done when:** rebuild produces byte-identical canonical output on unchanged raw.
 
-### T2.6 — Workout dedup / `session_group_id` 🔒
+### [x] T2.6 — Workout dedup / `session_group_id` 🔒
 Implement grouping so the same real workout from multiple sources is counted
 once. Suggested approach: group by `(user_id, sport_type)` where start times fall
 within a tolerance window (~5 min) and durations overlap substantially — but
@@ -126,7 +126,7 @@ configurable.
 **Done when:** tests cover: same workout from 2 sources → 1 group; genuinely
 distinct back-to-back workouts → 2 groups; overlapping-but-different sports.
 
-### T2.7 — The resolver
+### [x] T2.7 — The resolver
 Implement `recovery_resolved` (and an equivalent for weight/food if the shapes
 warrant it). Precedence must live in **one obvious, documented place** —
 post-membership adapter swap is a one-line change and it should be trivially
