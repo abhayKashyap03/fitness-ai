@@ -155,7 +155,7 @@ requirements (**return "insufficient data," never a misleading number**).
 
 **Done when:** tested against hand-computed fixtures.
 
-### T3.3 — Adaptive TDEE 🔒
+### [x] T3.3 — Adaptive TDEE 🔒
 MacroFactor-style: estimate expenditure from **weight trend + logged intake**
 over a rolling window. Deliberately **does not** use wearable calorie estimates
 as the primary signal (they're unreliable) — but keep them available for

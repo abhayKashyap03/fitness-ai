@@ -200,6 +200,30 @@ def _cmd_status(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_tdee(settings: Settings, args: argparse.Namespace) -> int:
+    from ..compute.tdee import build_window, estimate_tdee
+    from ..compute.trends import Insufficient
+
+    conn = db.connect(settings.db_path)
+    try:
+        window = build_window(conn, args.end, args.window, settings.user_id)
+    finally:
+        conn.close()
+    est = estimate_tdee(window)
+    if isinstance(est, Insufficient):
+        print(
+            f"Insufficient data for TDEE: have {est.have} logged-intake day(s), "
+            f"need {est.needed}. Log more consistently."
+        )
+        return 0
+    print(f"── Adaptive TDEE · {args.window}d ending {args.end} ──")
+    print(f"  TDEE estimate:   {est.tdee_kcal:.0f} kcal/day")
+    print(f"  mean intake:     {est.mean_intake_kcal:.0f} kcal/day")
+    print(f"  trend Δweight:   {est.trend_delta_kg:+.3f} kg over {est.span_days}d")
+    print(f"  logged-intake days: {est.intake_days}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="coach", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -233,6 +257,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_status = sub.add_parser("status", help="daily rollup for a date")
     p_status.add_argument("--date", required=True, help="day_key (YYYY-MM-DD)")
     p_status.set_defaults(func=_cmd_status)
+
+    p_tdee = sub.add_parser("tdee", help="adaptive TDEE estimate over a window")
+    p_tdee.add_argument("--end", required=True, help="window end day_key (YYYY-MM-DD)")
+    p_tdee.add_argument("--window", type=int, default=14, help="window length in days")
+    p_tdee.set_defaults(func=_cmd_tdee)
 
     return parser
 
