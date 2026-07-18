@@ -131,7 +131,23 @@ Target: Phase 0 + 1 + 2 complete; Phase 3 stretch. No Phase 4. No hardware tasks
 - WHOOP fixtures are SYNTHETIC (labeled). First real payloads may differ in field
   names/nesting — that's an expected reconciliation in normalize/whoop.py +
   adapters/whoop/client.py, not a rewrite.
-- Python is 3.10 (no 3.11 on machine) — ADR-0003. Bump the floor when available.
+
+---
+
+## Session 2026-07-18 (b) — Python 3.10 → 3.14 migration
+
+User installed Python 3.14.6 (`python@3.14`) and removed 3.10. Migrated:
+- Rebuilt `.venv` on `/opt/homebrew/bin/python3.14`; re-installed `-e ".[dev]"`.
+- `pyproject.toml`: `requires-python = ">=3.14"`, ruff `py314`, mypy `3.14`.
+- Fixed `~/.zshrc` (outside repo): removed stale `alias python3="python3.10"` and
+  a dead `python@3.10` PATH export; added `alias python="python3"`. Interactive
+  shell now: `python` and `python3` → 3.14.6.
+- Ruff pyupgrade auto-fix: `timezone.utc` → `datetime.UTC` (21 edits, UP017).
+- **Verified:** ruff + format + mypy clean, 79 tests green, `coach` entry point
+  runs on 3.14. Now fully CLAUDE.md §3-compliant. ADR-0003 updated.
+- **Heads-up (not acted on):** `~/.zshrc` lines 18–21 hold plaintext API keys
+  (Groq/DeepSeek/Gemini/AlphaVantage). Consider moving them out of a dotfile
+  and rotating — flagged, untouched.
 
 ### Next (for a future session)
 - Live-verify WHOOP end to end once logged in; re-record real fixtures.

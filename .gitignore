@@ -33,6 +33,15 @@ venv/
 env/
 .python-version
 
+# A venv accidentally created at the repo ROOT (not in .venv/) drops these here.
+# Never track a venv. (Root-anchored so a real src/bin etc. is unaffected.)
+/bin/
+/lib/
+/lib64/
+/include/
+/share/
+/pyvenv.cfg
+
 # --- Tooling --------------------------------------------------
 .pytest_cache/
 .ruff_cache/

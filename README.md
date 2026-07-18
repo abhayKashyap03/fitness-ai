@@ -21,7 +21,7 @@ compute → query) on WHOOP first. Track progress in [`TASKS.md`](TASKS.md) and
 
 ## Requirements
 
-- Python **3.10+** (§3 targets 3.11+; 3.10 is supported — see
+- Python **3.14** (`requires-python = ">=3.14"` — see
   [ADR-0003](docs/adr/0003-runtime-and-tooling.md)).
 - SQLite (bundled with Python). No server, no cloud, no UI.
 

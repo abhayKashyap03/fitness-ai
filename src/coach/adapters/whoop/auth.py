@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -27,7 +27,7 @@ class ReauthRequired(RuntimeError):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class TokenSet:
             "refresh_token": self.refresh_token,
             "token_type": self.token_type,
             "scope": self.scope,
-            "expires_at": self.expires_at.astimezone(timezone.utc).isoformat(),
+            "expires_at": self.expires_at.astimezone(UTC).isoformat(),
         }
 
     @classmethod

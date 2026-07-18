@@ -78,7 +78,7 @@ a known, expected failure class here — write tests for them.
 
 | Decision | Value | Notes |
 |---|---|---|
-| Language | **Python 3.11+** | |
+| Language | **Python 3.14** | |
 | Store | **SQLite** (single file) | Fine at n=1; two-way door |
 | Shape of v0 | **Local CLI**, no server, no UI | Prove the spine before any UI |
 | Hosting | **None** — runs locally | |
