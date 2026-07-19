@@ -1,4 +1,7 @@
-"""Raw ingest idempotency, normalize end-to-end, rebuild determinism, resolver."""
+"""Raw ingest idempotency, normalize end-to-end, rebuild determinism.
+
+Uses REAL (scrubbed) WHOOP fixtures. See tests/fixtures/whoop/README.md.
+"""
 
 from __future__ import annotations
 
@@ -17,17 +20,14 @@ def _load(name: str) -> dict:
 
 
 class FakeClient:
-    """Serves fixture pages; records call counts to prove no live calls."""
+    """Serves recorded fixture payloads (no live calls)."""
 
     def get_recovery(self, start=None, end=None):
         return _load("recovery_page1.json")["records"] + _load("recovery_page2.json")["records"]
 
     def get_cycles(self, start=None, end=None):
-        # two cycles supplying timezone offsets for the recovery records
-        return [
-            {"id": 93845, "start": "2026-07-10T04:00:00Z", "timezone_offset": "-04:00"},
-            {"id": 93847, "start": "2026-07-12T04:00:00Z", "timezone_offset": "-04:00"},
-        ]
+        # real cycles supply the timezone offset for each recovery
+        return _load("cycle_page1.json")["records"]
 
     def get_sleep(self, start=None, end=None):
         return []
@@ -44,14 +44,14 @@ class FakeClient:
 
 def test_ingest_writes_raw_and_is_idempotent(migrated_conn):
     conn = migrated_conn
-    r1 = ingest_whoop(conn, FakeClient(), since="2026-07-10")
+    r1 = ingest_whoop(conn, FakeClient(), since="2026-06-01T00:00:00.000Z")
     # raw is sacred: all 3 recovery records stored (incl. the PENDING one)
     assert r1["recovery"]["inserted"] == 3
     assert r1["workout"]["inserted"] == 2
     n_first = conn.execute("SELECT COUNT(*) FROM raw_events").fetchone()[0]
 
     # re-ingest the same window: nothing new
-    r2 = ingest_whoop(conn, FakeClient(), since="2026-07-10")
+    r2 = ingest_whoop(conn, FakeClient(), since="2026-06-01T00:00:00.000Z")
     assert r2["recovery"]["inserted"] == 0
     assert r2["recovery"]["skipped"] == 3
     n_second = conn.execute("SELECT COUNT(*) FROM raw_events").fetchone()[0]
@@ -62,7 +62,7 @@ def test_ingest_writes_raw_and_is_idempotent(migrated_conn):
 
 
 def _seed(conn):
-    ingest_whoop(conn, FakeClient(), since="2026-07-10")
+    ingest_whoop(conn, FakeClient(), since="2026-06-01T00:00:00.000Z")
 
 
 def test_normalize_populates_canonical(migrated_conn):
@@ -76,10 +76,10 @@ def test_normalize_populates_canonical(migrated_conn):
     # recovery day_key uses the cycle's offset; offset stored in utc_offset,
     # tz_name stays NULL (IANA-only) per §2.6
     row = migrated_conn.execute(
-        "SELECT day_key, tz_name, utc_offset FROM recovery WHERE score=66"
+        "SELECT day_key, tz_name, utc_offset FROM recovery WHERE score=37.0"
     ).fetchone()
-    assert row["day_key"] == "2026-07-10"
-    assert row["utc_offset"] == "-04:00"
+    assert row["day_key"] == "2026-06-01"
+    assert row["utc_offset"] == "-10:00"
     assert row["tz_name"] is None
 
 
@@ -99,4 +99,6 @@ def test_workout_day_boundary_persisted(migrated_conn):
     _seed(migrated_conn)
     normalize_all(migrated_conn)
     days = {r["day_key"] for r in migrated_conn.execute("SELECT day_key FROM workout")}
-    assert days == {"2026-07-10", "2026-07-09"}  # the -05:00 run lands on the 9th
+    # the Hawaii walk (06:11Z at -10:00) lands on the local previous day 05-31;
+    # the swim (17:43Z at -10:00) is same local day 06-02
+    assert days == {"2026-05-31", "2026-06-02"}

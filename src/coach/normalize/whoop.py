@@ -115,13 +115,15 @@ def parse_workout(payload: dict, *, user_id: int = 1) -> WorkoutRow:
 
     score = payload.get("score") or {}
     sport_id = payload.get("sport_id")
-    zones = score.get("zone_duration")
+    sport_name = payload.get("sport_name")
+    # real WHOOP v2 uses "zone_durations" (plural); tolerate the singular too
+    zones = score.get("zone_durations", score.get("zone_duration"))
 
     return WorkoutRow(
         user_id=user_id,
         source="whoop_api",
         external_id=str(payload.get("id")) if payload.get("id") is not None else None,
-        sport_type=whoop_sport_to_canonical(sport_id),
+        sport_type=whoop_sport_to_canonical(sport_id, sport_name),
         source_sport_raw=(
             payload.get("sport_name")
             if payload.get("sport_name") is not None

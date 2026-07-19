@@ -1,20 +1,20 @@
 {
   "records": [
     {
-      "cycle_id": 93847,
-      "sleep_id": "cccc1111-2222-3333-4444-555566667777",
-      "user_id": 10129,
-      "created_at": "2026-07-12T10:50:00.000Z",
-      "updated_at": "2026-07-12T10:50:00.000Z",
-      "score_state": "SCORED",
+      "created_at": "2026-06-02T13:35:43.587Z",
+      "cycle_id": 1541375428,
       "score": {
-        "user_calibrating": false,
-        "recovery_score": 71,
-        "resting_heart_rate": 50,
-        "hrv_rmssd_milli": 55.1,
-        "spo2_percentage": 97.0,
-        "skin_temp_celsius": 33.5
-      }
+        "hrv_rmssd_milli": 64.822014,
+        "recovery_score": 52.0,
+        "resting_heart_rate": 67.0,
+        "skin_temp_celsius": 34.184,
+        "spo2_percentage": 98.4375,
+        "user_calibrating": false
+      },
+      "score_state": "SCORED",
+      "sleep_id": "7b5b5631-0bf9-4ab5-b384-0f106b43ced9",
+      "updated_at": "2026-06-02T14:57:13.951Z",
+      "user_id": 1
     }
   ],
   "next_token": null

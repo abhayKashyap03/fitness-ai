@@ -28,9 +28,9 @@ def test_recovery_paginates_and_follows_next_token():
         page = "recovery_page2.json" if token == "PAGE2TOKEN" else "recovery_page1.json"
         return httpx.Response(200, json=_load(page))
 
-    records = _client(handler).get_recovery("2026-07-10", "2026-07-13")
+    records = _client(handler).get_recovery("2026-06-01", "2026-06-03")
     assert len(records) == 3  # 2 + 1 across two pages
-    assert {r["cycle_id"] for r in records} == {93845, 93846, 93847}
+    assert {r["cycle_id"] for r in records} == {1539008513, 999999, 1541375428}
 
 
 def test_bearer_token_sent_and_not_returned_in_error():
@@ -82,4 +82,4 @@ def test_body_measurement_single_object():
         return httpx.Response(200, json=_load("body_measurement.json"))
 
     body = _client(handler).get_body_measurement()
-    assert body["weight_kilogram"] == 80.4
+    assert body["weight_kilogram"] == 83.18884
