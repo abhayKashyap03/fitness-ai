@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SYNTHETIC Apple Health export sample. Every value/date is FABRICATED — this is
+  NOT a slice of anyone's real export (CLAUDE.md §6.2/§6.3). Structurally mirrors
+  the observed format (docs/healthkit-export-notes.md): dietary per-meal (MFP)
+  and per-item (Foodnoms), body in lb, multi-source BodyMass, HKTimeZone IANA on
+  dietary only, a to-be-skipped HeartRate, and a malformed value.
+-->
+<HealthData locale="en_US">
+  <ExportDate value="2026-01-01 00:00:00 -0500"/>
+  <Me HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexMale"/>
+
+  <!-- MyFitnessPal: per-meal dietary, with meal + IANA tz metadata -->
+  <Record type="HKQuantityTypeIdentifierDietaryEnergyConsumed" sourceName="MyFitnessPal" sourceVersion="1.0" unit="Cal" creationDate="2026-01-02 12:05:00 -0500" startDate="2026-01-02 12:00:00 -0500" endDate="2026-01-02 12:00:00 -0500" value="600">
+    <MetadataEntry key="meal" value="Lunch"/>
+    <MetadataEntry key="HKFoodType" value="Sandwich"/>
+    <MetadataEntry key="HKTimeZone" value="America/New_York"/>
+    <MetadataEntry key="HKWasUserEntered" value="1"/>
+    <MetadataEntry key="HKExternalUUID" value="mfp-0001"/>
+  </Record>
+  <Record type="HKQuantityTypeIdentifierDietaryProtein" sourceName="MyFitnessPal" unit="g" creationDate="2026-01-02 12:05:00 -0500" startDate="2026-01-02 12:00:00 -0500" endDate="2026-01-02 12:00:00 -0500" value="30">
+    <MetadataEntry key="meal" value="Lunch"/>
+    <MetadataEntry key="HKTimeZone" value="America/New_York"/>
+  </Record>
+
+  <!-- Foodnoms: per-item dietary, travel timezone (Tokyo) -->
+  <Record type="HKQuantityTypeIdentifierDietaryEnergyConsumed" sourceName="Foodnoms" unit="Cal" creationDate="2026-01-03 08:00:00 -0500" startDate="2026-01-03 08:00:00 +0900" endDate="2026-01-03 08:00:00 +0900" value="220">
+    <MetadataEntry key="HKFoodType" value="Rice bowl"/>
+    <MetadataEntry key="HKTimeZone" value="Asia/Tokyo"/>
+  </Record>
+
+  <!-- Body: OKOK scale in POUNDS, plus multi-source BodyMass from MFP -->
+  <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="OKOK&#183;International Version" unit="lb" creationDate="2026-01-02 07:00:00 -0500" startDate="2026-01-02 07:00:00 -0500" endDate="2026-01-02 07:00:00 -0500" value="183.5"/>
+  <Record type="HKQuantityTypeIdentifierBodyFatPercentage" sourceName="OKOK&#183;International Version" unit="%" creationDate="2026-01-02 07:00:00 -0500" startDate="2026-01-02 07:00:00 -0500" endDate="2026-01-02 07:00:00 -0500" value="18.5"/>
+  <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="MyFitnessPal" unit="lb" creationDate="2026-01-02 09:00:00 -0500" startDate="2026-01-02 09:00:00 -0500" endDate="2026-01-02 09:00:00 -0500" value="184.0"/>
+
+  <!-- Out of scope: must be skipped -->
+  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min" creationDate="2026-01-02 07:00:00 -0500" startDate="2026-01-02 07:00:00 -0500" endDate="2026-01-02 07:00:00 -0500" value="70"/>
+
+  <!-- Malformed value: must yield with value=None, not crash -->
+  <Record type="HKQuantityTypeIdentifierDietaryFatTotal" sourceName="MyFitnessPal" unit="g" creationDate="2026-01-02 12:05:00 -0500" startDate="2026-01-02 12:00:00 -0500" endDate="2026-01-02 12:00:00 -0500" value="not-a-number"/>
+</HealthData>
