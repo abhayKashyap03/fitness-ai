@@ -75,9 +75,9 @@ def _open_export(source: str | Path | IO[bytes]) -> tuple[IO[bytes], zipfile.Zip
     ``.../export.xml``), or an already-open binary file object. Returns the
     stream plus the owning ZipFile (to close later) or None.
     """
-    if hasattr(source, "read"):
-        return source, None
-    path = Path(source)  # type: ignore[arg-type]
+    if not isinstance(source, (str, Path)):
+        return source, None  # already a binary file object
+    path = Path(source)
     if path.suffix.lower() == ".zip":
         zf = zipfile.ZipFile(path)
         names = [
