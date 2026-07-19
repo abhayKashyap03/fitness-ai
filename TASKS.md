@@ -221,3 +221,30 @@ Before you stop (or when the window is nearly exhausted):
 4. Ensure `DECISIONS_NEEDED.md` reflects every open question, each with your
    recommendation.
 5. Confirm `pytest` and `ruff check` pass on the final commit.
+
+---
+
+## Phase 5 — Apple Health ingestion (nutrition + weight)
+
+Full spec in `TASKS_PHASE5.md`. Apple Health is our nutrition source (MFP writes
+into it) and our ONLY weight source. Work in order; recon before code.
+
+- [x] **T5.0 — Protect the export file** 🔒 — `apple_health_export/` gitignored
+  (`.gitignore:56`), never tracked/staged/committed. **NOTE: the export is not
+  present on disk** — see SESSION_LOG. T5.1+ are BLOCKED until it is placed.
+- [ ] **T5.1 — Reconnaissance** ⛔ BLOCKED (no export) — inventory the real file
+  → `docs/healthkit-export-notes.md` (aggregate stats only, §6.3). No adapter code
+  until done. Focus: MFP nutrition granularity, macro presence, sourceNames,
+  IANA tz metadata.
+- [ ] **T5.2 — Streaming XML parser** ⛔ (needs T5.1) — `iterparse`, flat memory,
+  nutrition + body only; skip workouts/HR/steps/sleep.
+- [ ] **T5.3 — Raw ingestion** ⛔ — verbatim to `raw_events`; deterministic
+  `external_id` from `(type, sourceName, startDate, value)`; idempotent re-import.
+- [ ] **T5.4 — Normalizers** ⛔ — `food_entry` + `weight_measurement`; unit
+  conversions tested; §2.7 (no zero-fill); siblings kept (§2.3).
+- [ ] **T5.5 — Timezone backfill** ⛔ — only if T5.1 finds real IANA data; else
+  leave `tz_name` NULL (ADR-0006). Cross-source inference → DECISIONS_NEEDED.
+- [ ] **T5.6 — CLI** ⛔ — `coach ingest healthkit --file <path>` (.xml/.zip).
+- [ ] **T5.7 — Verify against real data** ⛔ — `coach status` / `coach tdee`.
+- [ ] **T5.8 — Fixtures** ⛔ — small scrubbed synthetic from the OBSERVED format
+  (§6.2). Never commit any slice of the real export.

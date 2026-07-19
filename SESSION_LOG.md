@@ -207,3 +207,37 @@ Gitignored `postman/` `.postman/` (can embed tokens).
 
 Note: the D1/CLAUDE-alignment work (PR #2) is still open/unmerged; this fix
 branches off main independently.
+
+---
+
+## Session 2026-07-19 — Phase 5 kickoff: BLOCKED on missing export
+
+**T5.0 (safety) — DONE and PASSED.** `apple_health_export/` is gitignored
+(`.gitignore:56`), NOT tracked, absent from ALL git history, not staged, does not
+appear in `git status`. Verified every way. No exposure ever.
+
+**⛔ BLOCKER — the Apple Health export is NOT in the repo.** The prompt says
+`apple_health_export/` is in the repo root, but it does not exist on disk. Swept
+the whole repo: no `apple_health_export/` dir, no `export.xml`, no `.zip`, no
+health-named file anywhere (only `data/coach.db` + caches). It was never placed,
+or is still elsewhere on the machine.
+
+Consequence: **T5.1 recon cannot run**, and T5.2–T5.8 all depend on it. Per your
+own instruction and §7.4/§8.1, I did **not**:
+- go looking outside the repo for it (§8.1 — stay in the project folder), nor
+- build a parser/fixtures against the *assumed* Apple Health structure (that is
+  exactly the WHOOP-404 mistake you told me to avoid; recon on the real file must
+  come first).
+
+**Done this session:** appended Phase 5 (T5.0–T5.8) to `TASKS.md`; T5.0 checked;
+T5.1+ marked BLOCKED. pytest/ruff/mypy still green (no code touched).
+
+**To unblock (your action):** place the Apple Health export at the repo root as
+`apple_health_export/` — the unzipped folder containing `export.xml` (Health app
+→ profile → Export All Health Data produces `export.zip`; unzip it so
+`apple_health_export/apple_health_export/export.xml` or
+`apple_health_export/export.xml` exists). The `coach ingest healthkit` command
+(T5.6) will also accept the `.zip` directly once built. Then re-run this session;
+T5.1 recon is the first thing that will happen.
+
+**Not done (blocked):** T5.1–T5.8. Nothing built against guessed structure.
