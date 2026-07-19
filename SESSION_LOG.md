@@ -241,3 +241,29 @@ T5.1+ marked BLOCKED. pytest/ruff/mypy still green (no code touched).
 T5.1 recon is the first thing that will happen.
 
 **Not done (blocked):** T5.1–T5.8. Nothing built against guessed structure.
+
+---
+
+## Session 2026-07-19 (b) — Phase 5 resumed: export placed, T5.0 + T5.1 done
+
+Export now at `apple_health_export/` (1.1 GB). **T5.0 done**: gitignored rule
+committed; never tracked/staged (verified every way).
+
+**T5.1 recon DONE** → `docs/healthkit-export-notes.md` (aggregate only, §6.3).
+Streaming inventory of 1.69M records (2018–2026). Headlines:
+- **Nutrition is SPARSE** — only ~5 logged days reached Apple Health
+  (DietaryEnergyConsumed = 33 records). MyFitnessPal writes **per-meal** (~4/day,
+  has meal-name metadata), Foodnoms **per-item** (~20/day). Macros present on
+  100% of energy-days. Energy unit `Cal`(kcal), macros `g`. **The nutrition arm
+  will be data-starved — you should know most food logging isn't reaching the
+  export.**
+- **Weight is RICH** — OKOK scale (296 days, BodyMass/Fat/BMI/LeanMass) + MFP
+  (103 days BodyMass). **Unit is `lb`** (convert→kg). Multi-source BodyMass →
+  siblings. BodyFat is `%`.
+- **Timezone**: `HKTimeZone` carries **real IANA** (home US-Eastern + 2 travel
+  zones) but **only on dietary rows, not body**. The `startDate` offset is
+  normalized/unreliable → dietary `day_key` must come from `HKTimeZone`.
+- Two food loggers (MFP + Foodnoms); `HKExternalUUID` on dietary only.
+
+Verified honestly: recon is real (ran against the actual file); no adapter code
+written yet (T5.2+ next). pytest/ruff/mypy untouched/green.
