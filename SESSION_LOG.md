@@ -267,3 +267,30 @@ Streaming inventory of 1.69M records (2018–2026). Headlines:
 
 Verified honestly: recon is real (ran against the actual file); no adapter code
 written yet (T5.2+ next). pytest/ruff/mypy untouched/green.
+
+### T5.2 done + session stop point
+- **T5.2 parser** built + verified on the REAL export (1953 wanted records =
+  543 dietary + 1410 body, matches T5.1 exactly, ~6s flat memory). 7 tests.
+  Committed. **PR #5** opened (T5.0–T5.2).
+- **Stopped here** (clean boundary) — cost/context high; T5.3–T5.8 is a large
+  chunk better done fresh than risked mid-task.
+- **D3 flagged** (DECISIONS_NEEDED): HealthKit sub-source namespacing.
+  raw_events stays `source='healthkit'` (sacred table untouched, no CHECK
+  rebuild); canonical sibling distinction needs a call — recommended a
+  non-destructive `source_app` ADD COLUMN. **Answer D3 and T5.4 proceeds.**
+
+### Next session (T5.3 onward)
+1. Answer **D3**.
+2. T5.3: healthkit ingest → raw_events verbatim, `source='healthkit'`,
+   deterministic `external_id = hash(type, sourceName, startDate, value)`,
+   idempotent (re-import = no dups). Test with the synthetic fixture.
+3. T5.4: normalizers → food_entry (per-record, Cal→kcal, day_key from
+   HKTimeZone, no zero-fill §2.7) + weight_measurement (lb→kg, BodyFat %).
+4. T5.5 tz backfill, T5.6 CLI (`coach ingest healthkit --file`), T5.7 verify on
+   real data, T5.8 fixtures.
+- Reminder: nutrition is sparse (~5 days) — status/tdee will be thin on food.
+
+### Verified vs unverified (this session)
+- Verified: export safety (every way); recon ran on the real file; parser
+  matches the real inventory. 91 tests green; ruff + mypy clean.
+- Unverified: nothing built beyond the parser; no canonical HealthKit rows yet.
