@@ -221,3 +221,32 @@ Before you stop (or when the window is nearly exhausted):
 4. Ensure `DECISIONS_NEEDED.md` reflects every open question, each with your
    recommendation.
 5. Confirm `pytest` and `ruff check` pass on the final commit.
+
+---
+
+## Phase 5 — Apple Health ingestion (nutrition + weight)
+
+Full spec in `TASKS_PHASE5.md`. Apple Health is our nutrition source (MFP writes
+into it) and our ONLY weight source. Work in order; recon before code.
+
+- [x] **T5.0 — Protect the export file** 🔒 — `apple_health_export/` gitignored
+  (`.gitignore:56`, rule committed), never tracked/staged/committed. Export now
+  present (1.1 GB).
+- [x] **T5.1 — Reconnaissance** — `docs/healthkit-export-notes.md` written.
+  Key findings: nutrition is SPARSE (~5 logged days; MFP per-meal, Foodnoms
+  per-item); macros present 100% of energy-days; weight RICH (OKOK scale + MFP,
+  unit **lb**); multi-source BodyMass → siblings; **real IANA via `HKTimeZone`
+  on dietary rows only** (startDate offset unreliable) — day_key from HKTimeZone.
+- [ ] **T5.2 — Streaming XML parser** — `iterparse`, flat memory, nutrition +
+  body only; skip workouts/HR/steps/sleep; read MetadataEntry before clearing.
+- [ ] **T5.3 — Raw ingestion** — verbatim to `raw_events`; `source` =
+  `healthkit:<app>`; deterministic `external_id` from `(type,sourceName,startDate,
+  value)`; idempotent; migration to widen source CHECK.
+- [ ] **T5.4 — Normalizers** — `food_entry` + `weight_measurement`; lb→kg, BodyFat
+  %; §2.7 (no zero-fill); siblings kept (§2.3); dietary day_key from HKTimeZone.
+- [ ] **T5.5 — Timezone backfill** — populate `tz_name` (IANA) for dietary rows
+  from `HKTimeZone`; body rows NULL; cross-source WHOOP backfill → DECISIONS_NEEDED.
+- [ ] **T5.6 — CLI** — `coach ingest healthkit --file <path>` (.xml/.zip).
+- [ ] **T5.7 — Verify against real data** — `coach status` / `coach tdee`.
+- [ ] **T5.8 — Fixtures** — small scrubbed synthetic from the OBSERVED format
+  (§6.2). Never commit any slice of the real export.

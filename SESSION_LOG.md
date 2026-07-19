@@ -207,3 +207,90 @@ Gitignored `postman/` `.postman/` (can embed tokens).
 
 Note: the D1/CLAUDE-alignment work (PR #2) is still open/unmerged; this fix
 branches off main independently.
+
+---
+
+## Session 2026-07-19 — Phase 5 kickoff: BLOCKED on missing export
+
+**T5.0 (safety) — DONE and PASSED.** `apple_health_export/` is gitignored
+(`.gitignore:56`), NOT tracked, absent from ALL git history, not staged, does not
+appear in `git status`. Verified every way. No exposure ever.
+
+**⛔ BLOCKER — the Apple Health export is NOT in the repo.** The prompt says
+`apple_health_export/` is in the repo root, but it does not exist on disk. Swept
+the whole repo: no `apple_health_export/` dir, no `export.xml`, no `.zip`, no
+health-named file anywhere (only `data/coach.db` + caches). It was never placed,
+or is still elsewhere on the machine.
+
+Consequence: **T5.1 recon cannot run**, and T5.2–T5.8 all depend on it. Per your
+own instruction and §7.4/§8.1, I did **not**:
+- go looking outside the repo for it (§8.1 — stay in the project folder), nor
+- build a parser/fixtures against the *assumed* Apple Health structure (that is
+  exactly the WHOOP-404 mistake you told me to avoid; recon on the real file must
+  come first).
+
+**Done this session:** appended Phase 5 (T5.0–T5.8) to `TASKS.md`; T5.0 checked;
+T5.1+ marked BLOCKED. pytest/ruff/mypy still green (no code touched).
+
+**To unblock (your action):** place the Apple Health export at the repo root as
+`apple_health_export/` — the unzipped folder containing `export.xml` (Health app
+→ profile → Export All Health Data produces `export.zip`; unzip it so
+`apple_health_export/apple_health_export/export.xml` or
+`apple_health_export/export.xml` exists). The `coach ingest healthkit` command
+(T5.6) will also accept the `.zip` directly once built. Then re-run this session;
+T5.1 recon is the first thing that will happen.
+
+**Not done (blocked):** T5.1–T5.8. Nothing built against guessed structure.
+
+---
+
+## Session 2026-07-19 (b) — Phase 5 resumed: export placed, T5.0 + T5.1 done
+
+Export now at `apple_health_export/` (1.1 GB). **T5.0 done**: gitignored rule
+committed; never tracked/staged (verified every way).
+
+**T5.1 recon DONE** → `docs/healthkit-export-notes.md` (aggregate only, §6.3).
+Streaming inventory of 1.69M records (2018–2026). Headlines:
+- **Nutrition is SPARSE** — only ~5 logged days reached Apple Health
+  (DietaryEnergyConsumed = 33 records). MyFitnessPal writes **per-meal** (~4/day,
+  has meal-name metadata), Foodnoms **per-item** (~20/day). Macros present on
+  100% of energy-days. Energy unit `Cal`(kcal), macros `g`. **The nutrition arm
+  will be data-starved — you should know most food logging isn't reaching the
+  export.**
+- **Weight is RICH** — OKOK scale (296 days, BodyMass/Fat/BMI/LeanMass) + MFP
+  (103 days BodyMass). **Unit is `lb`** (convert→kg). Multi-source BodyMass →
+  siblings. BodyFat is `%`.
+- **Timezone**: `HKTimeZone` carries **real IANA** (home US-Eastern + 2 travel
+  zones) but **only on dietary rows, not body**. The `startDate` offset is
+  normalized/unreliable → dietary `day_key` must come from `HKTimeZone`.
+- Two food loggers (MFP + Foodnoms); `HKExternalUUID` on dietary only.
+
+Verified honestly: recon is real (ran against the actual file); no adapter code
+written yet (T5.2+ next). pytest/ruff/mypy untouched/green.
+
+### T5.2 done + session stop point
+- **T5.2 parser** built + verified on the REAL export (1953 wanted records =
+  543 dietary + 1410 body, matches T5.1 exactly, ~6s flat memory). 7 tests.
+  Committed. **PR #5** opened (T5.0–T5.2).
+- **Stopped here** (clean boundary) — cost/context high; T5.3–T5.8 is a large
+  chunk better done fresh than risked mid-task.
+- **D3 flagged** (DECISIONS_NEEDED): HealthKit sub-source namespacing.
+  raw_events stays `source='healthkit'` (sacred table untouched, no CHECK
+  rebuild); canonical sibling distinction needs a call — recommended a
+  non-destructive `source_app` ADD COLUMN. **Answer D3 and T5.4 proceeds.**
+
+### Next session (T5.3 onward)
+1. Answer **D3**.
+2. T5.3: healthkit ingest → raw_events verbatim, `source='healthkit'`,
+   deterministic `external_id = hash(type, sourceName, startDate, value)`,
+   idempotent (re-import = no dups). Test with the synthetic fixture.
+3. T5.4: normalizers → food_entry (per-record, Cal→kcal, day_key from
+   HKTimeZone, no zero-fill §2.7) + weight_measurement (lb→kg, BodyFat %).
+4. T5.5 tz backfill, T5.6 CLI (`coach ingest healthkit --file`), T5.7 verify on
+   real data, T5.8 fixtures.
+- Reminder: nutrition is sparse (~5 days) — status/tdee will be thin on food.
+
+### Verified vs unverified (this session)
+- Verified: export safety (every way); recon ran on the real file; parser
+  matches the real inventory. 91 tests green; ruff + mypy clean.
+- Unverified: nothing built beyond the parser; no canonical HealthKit rows yet.

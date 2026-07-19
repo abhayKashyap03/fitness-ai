@@ -51,3 +51,6 @@ htmlcov/
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- Misc -----------------------------------------------------
+apple_health_export/
