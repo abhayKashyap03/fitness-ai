@@ -41,6 +41,7 @@ def test_anthropic_tool_defs_shape():
         "get_weight_trend",
         "get_recovery_history",
         "get_tdee_estimate",
+        "get_safety_flags",
     }
     for d in defs:
         assert set(d) == {"name", "description", "input_schema"}  # no handler leaked
@@ -118,3 +119,46 @@ def test_tdee_insufficient_returns_null_estimate_not_a_number(seeded_conn):
     out = tools.get_tdee_estimate(seeded_conn, end=WEIGH_DAY, window=14)
     assert out["estimate"] is None
     assert out["insufficient"]["needed"] == 10  # no intake logged
+
+
+# ---- §8.6 safety flags tool ------------------------------------------------
+
+
+def test_safety_flags_insufficient_with_single_weigh_in(seeded_conn):
+    # fixture has one weigh-in day -> not enough trend to judge; no false alarm
+    out = tools.get_safety_flags(seeded_conn, end=WEIGH_DAY, window=30)
+    assert out["alerts"] == []
+    assert out["insufficient"] == {"have": 1, "needed": 2}
+
+
+def _seed_declining_series(conn, *, days, start_kg, per_day):
+    from datetime import date, timedelta
+
+    d0 = date(2026, 3, 1)
+    for i in range(days):
+        day = (d0 + timedelta(days=i)).isoformat()
+        conn.execute(
+            "INSERT INTO weight_measurement (id, user_id, day_key, source, source_app, "
+            "weight_kg, raw_ref, derived_at) VALUES (?,1,?,?,?,?,?,?)",
+            (f"wt:test:{day}", day, "manual", None, start_kg - per_day * i, None,
+             "2026-01-01T00:00:00+00:00"),
+        )
+    conn.commit()
+    return (d0 + timedelta(days=days - 1)).isoformat()
+
+
+def test_safety_flags_surfaces_unsafe_loss(migrated_conn):
+    # ~0.25 kg/day settled decline (~1.9%/wk on ~90 kg) -> above the hard limit
+    end = _seed_declining_series(migrated_conn, days=40, start_kg=100.0, per_day=0.25)
+    out = tools.get_safety_flags(migrated_conn, end=end, window=14)
+    assert out["insufficient"] is None
+    assert len(out["alerts"]) == 1
+    assert out["alerts"][0]["code"] in {"fast_weight_loss", "rapid_weight_loss"}
+
+
+def test_safety_flags_quiet_on_maintenance(migrated_conn):
+    # flat weight -> no alert, no false alarm
+    end = _seed_declining_series(migrated_conn, days=40, start_kg=90.0, per_day=0.0)
+    out = tools.get_safety_flags(migrated_conn, end=end, window=14)
+    assert out["alerts"] == []
+    assert out["insufficient"] is None

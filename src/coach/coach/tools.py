@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from ..compute.daily import daily_status
+from ..compute.guardrails import Alert, TrendPoint, weight_loss_rate_alert
 from ..compute.tdee import build_window, estimate_tdee
 from ..compute.trends import Insufficient
 
@@ -41,6 +42,10 @@ class ToolSpec:
 
 def _insufficient(marker: Insufficient) -> dict:
     return {"have": marker.have, "needed": marker.needed}
+
+
+def _alert(a: Alert) -> dict:
+    return {"level": a.level, "code": a.code, "message": a.message, "evidence": a.evidence}
 
 
 # ---- handlers --------------------------------------------------------------
@@ -151,6 +156,39 @@ def get_tdee_estimate(
     }
 
 
+def get_safety_flags(
+    conn: sqlite3.Connection, *, end: str, window: int = 30, user_id: int = 1
+) -> dict:
+    """Deterministic health-safety flags over a window (§8.6).
+
+    Code-enforced hard limits, not model judgment: currently an unsafe
+    weight-loss-rate check off the EWMA trend. Returns structured alerts the
+    coach must surface plainly; an empty list means nothing tripped, and an
+    ``insufficient`` marker means there isn't enough trend to judge (no false
+    alarms).
+    """
+    from datetime import date, timedelta
+
+    end_d = date.fromisoformat(end)
+    start = (end_d - timedelta(days=window - 1)).isoformat()
+    rows = conn.execute(
+        "SELECT day_key, trend_kg FROM weight_trend "
+        "WHERE user_id = ? AND day_key BETWEEN ? AND ? ORDER BY day_key",
+        (user_id, start, end),
+    ).fetchall()
+    series = [TrendPoint(r["day_key"], r["trend_kg"]) for r in rows if r["trend_kg"] is not None]
+
+    alerts: list[dict] = []
+    insufficient: dict | None = None
+    result = weight_loss_rate_alert(series)
+    if isinstance(result, Insufficient):
+        insufficient = _insufficient(result)
+    elif isinstance(result, Alert):
+        alerts.append(_alert(result))
+
+    return {"end": end, "window": window, "alerts": alerts, "insufficient": insufficient}
+
+
 # ---- registry --------------------------------------------------------------
 
 _DAY = {"type": "string", "description": "day_key in YYYY-MM-DD"}
@@ -210,6 +248,20 @@ TOOLS: list[ToolSpec] = [
             "required": ["end"],
         },
         handler=get_tdee_estimate,
+    ),
+    ToolSpec(
+        name="get_safety_flags",
+        description=(
+            "Deterministic health-safety flags (§8.6) over a window — e.g. an "
+            "unsafe rate of weight loss. Code-enforced hard limits, not model "
+            "judgment. Surface any returned alert plainly to the user."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"end": _DAY, "window": _WINDOW},
+            "required": ["end"],
+        },
+        handler=get_safety_flags,
     ),
 ]
 
