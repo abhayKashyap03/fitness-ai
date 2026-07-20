@@ -8,21 +8,20 @@
 ## Where the code stands (verified)
 
 - Phases 0–3 complete. WHOOP vertical slice works **live**. **Phase 5 (Apple
-  Health, WEIGHT) complete** — HealthKit weight ingest → normalize → real trend
-  in `status`. 111 tests green; ruff + mypy clean.
+  Health, WEIGHT) complete**; **Phase 4 pre-work merged** (tool contract,
+  guardrails, grounding harness). 145 tests green; ruff + mypy clean.
 - Schema at **v5** (…0004 utc_offset, **0005 source_app** — D3/ADR-0008: adds
   `source_app` + `utc_offset` to weight/food, recreates resolver views; raw
   untouched).
-- **PR #5 + #6 MERGED** — Phase 5 WEIGHT is on `main` (T5.0–T5.8 + D3).
-- **Phase 4 pre-work** on branch **`phase4/coach-layer`** (stacked on merged #6):
-  T4.1 tool contract, §8.6 guardrails, T4.2 grounding harness (authored;
-  live-model eval gated on Anthropic SDK + API key). Deterministic, no tokens.
-  → open a PR.
+- **PR #5 + #6 + #7 MERGED — all on `main`.** #5/#6 = Phase 5 WEIGHT (T5.0–T5.8 +
+  D3). #7 = Phase 4 pre-work: T4.1 tool contract (`coach/tools.py`), §8.6
+  guardrails (`compute/guardrails.py`), T4.2 grounding harness authored
+  (`coach/grounding.py`; live-model eval gated on Anthropic SDK + API key).
 - CLI: `coach db init|status`, `auth whoop`, `ingest whoop`,
   **`ingest healthkit --file`**, `normalize [--rebuild]`, `status --date`, `tdee`.
-- **GateGuard disabled** via `.claude/settings.local.json` (`ECC_GATEGUARD=off`),
-  per user request (token cost). Takes effect on session start. **Conflicts with
-  CLAUDE.md §8.2** — see Open items.
+- **GateGuard disabled** via `.claude/settings.local.json` (`ECC_GATEGUARD=off`)
+  — **user-authorized 2026-07-19; do NOT re-flag** the §8.2 tension. File stays
+  untracked (machine-local).
 
 ---
 
@@ -107,13 +106,12 @@ scratchpad scripts against the real export; no repo code changed, no commits.
 
 ## Next session — do in this order
 
-**A. Weight/body-comp — ✅ DONE this session (branch `phase5/healthkit-weight`).**
-   Open a PR for that branch; the human reviews + merges (never self-merge).
-   First real ingest into the user's actual DB (`coach ingest healthkit --file
-   apple_health_export/export.xml && coach normalize`) is a human/verify step —
-   this session only verified against a scratch DB.
+**A. Weight/body-comp — ✅ DONE + MERGED (#5/#6). Phase 4 pre-work ✅ MERGED (#7).**
+   Remaining human step: first real ingest into the actual DB — `coach db init &&
+   coach ingest healthkit --file apple_health_export/export.xml && coach normalize`
+   (verified only against a scratch DB so far). `db init` first — applies 0005.
 
-**B. Food / MFP (starts when the CSV lands ~2026-07-20 PM):**
+**B. Food / MFP (starts when the CSV lands — expected ~2026-07-20 PM):**
 5. **Recon the MFP CSV first** — headers, date format, meal grouping, units, date
    range, distinct logged days. Do NOT assume columns (the WHOOP-404 lesson). Confirm
    the Feb–June month is present + gap-free.
@@ -121,14 +119,15 @@ scratchpad scripts against the real export; no repo code changed, no commits.
    ingest + pure `food_entry` normalizer (day_key from CSV local date, no zero-fill §2.7).
 
 **C. Open items (need the human):**
-- **§8.2 vs GateGuard** — settings.local.json disables it; §8.2 still forbids
-  disabling safety mechanisms. Either amend §8.2 to carve the explicit user-authorized
-  exception, or re-enable. User's call.
-- `~/.zshrc` plaintext API keys — flagged prior session, still unrotated.
+- `~/.zshrc` plaintext API keys — flagged, still unrotated.
+- Live grounding eval (T4.2) — needs Anthropic SDK (§6.4 sign-off) + API key +
+  token spend (§8.7). `run_live_grounding` raises until wired.
+- (GateGuard §8.2 — RESOLVED: stays off, user-authorized. No longer an open item.)
 
-### Verified vs unverified (this session)
-- Verified: weight pipeline end-to-end on the REAL export (1410 records ingested,
-  298 resolved days, trend surfaces in `status`); 111 tests / ruff / mypy green;
-  idempotent + byte-identical `--rebuild`.
+### Verified vs unverified
+- Verified: weight pipeline end-to-end on the REAL export (1410 records, 298
+  resolved days, trend in `status`); Phase 4 tools/guardrails/grounding
+  deterministic; 145 tests / ruff / mypy green; idempotent + byte-identical rebuild.
 - Unverified: not yet ingested into the user's **actual** DB (scratch DB only) —
-  human step. MFP privacy-export contents (not yet received). D4 still open.
+  human step. MFP privacy-export contents (not yet received). D4 still open. Live
+  model faithfulness (grounding) not yet run.
