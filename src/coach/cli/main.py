@@ -99,9 +99,16 @@ def _cmd_db_verify(settings: Settings, _args: argparse.Namespace) -> int:
     print(f"fk violations:   {report.fk_violations}")
     for table, n in report.row_counts.items():
         print(f"  {table:20} {'(missing)' if n < 0 else n}")
-    print(f"canonical fingerprint: {report.canonical_fingerprint[:16]}…")
-    print("OK" if report.ok else "PROBLEMS FOUND — restore from a backup")
-    return 0 if report.ok else 1
+    fp = report.canonical_fingerprint
+    print(f"canonical fingerprint: {fp[:16] + '…' if len(fp) == 64 else fp}")
+    if not report.ok:
+        print("PROBLEMS FOUND — restore from a backup")
+        return 1
+    if any(n < 0 for n in report.row_counts.values()):
+        print("NOT INITIALIZED — run `coach db init`")
+        return 1
+    print("OK")
+    return 0
 
 
 # ---- auth subcommands ------------------------------------------------------
@@ -136,6 +143,17 @@ def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
 # ---- ingest / normalize ----------------------------------------------------
 
 
+def _ensure_migrated(conn) -> None:
+    """Apply pending migrations before a write-path command (idempotent).
+
+    Keeps `coach sync`/`ingest` from crashing on a fresh or half-initialized
+    DB file; read-only commands (doctor, db verify) diagnose instead of mutate.
+    """
+    applied = db.migrate(conn)
+    if applied:
+        print(f"  (applied {len(applied)} pending migration(s))")
+
+
 def _whoop_client(settings: Settings) -> WhoopClient:
     oauth = WhoopOAuth(
         settings.whoop_client_id,
@@ -156,6 +174,7 @@ def _cmd_ingest_whoop(settings: Settings, args: argparse.Namespace) -> int:
         return 2
     conn = db.connect(settings.db_path)
     try:
+        _ensure_migrated(conn)
         since = args.since or auto_since(conn)
         if since is None:
             print(
@@ -191,6 +210,7 @@ def _cmd_ingest_healthkit(settings: Settings, args: argparse.Namespace) -> int:
         return 2
     conn = db.connect(settings.db_path)
     try:
+        _ensure_migrated(conn)
         result = ingest_healthkit(conn, path, user_id=settings.user_id)
     finally:
         conn.close()
@@ -332,19 +352,32 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
     if settings.db_path.exists():
         conn = db.connect(settings.db_path)
         try:
-            version = db.current_version(conn)
-            pending = db.pending_migrations(conn)
+            # read-only diagnosis: don't let current_version() create the
+            # schema_version table as a side effect on an unmigrated file
+            has_schema = (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+                ).fetchone()
+                is not None
+            )
+            if has_schema:
+                version = db.current_version(conn)
+                pending = db.pending_migrations(conn)
+            else:
+                version = 0
+                pending = db.discover_migrations()
             print(f"  schema:         v{version}" + (f"  (PENDING: {len(pending)})" if pending else "  (up to date)"))
             if pending:
                 problems += 1
                 print("                  -> run `coach db init`")
-            for source in ("whoop_api", "healthkit"):
-                row = conn.execute(
-                    "SELECT COUNT(*) AS n, MAX(ingested_at) AS last FROM raw_events WHERE source=?",
-                    (source,),
-                ).fetchone()
-                last = row["last"] or "never"
-                print(f"  raw[{source:9}] {row['n']:6d} rows   last ingest: {last}")
+            else:
+                for source in ("whoop_api", "healthkit"):
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS n, MAX(ingested_at) AS last FROM raw_events WHERE source=?",
+                        (source,),
+                    ).fetchone()
+                    last = row["last"] or "never"
+                    print(f"  raw[{source:9}] {row['n']:6d} rows   last ingest: {last}")
         finally:
             conn.close()
     else:
@@ -386,6 +419,7 @@ def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
 
     conn = db.connect(settings.db_path)
     try:
+        _ensure_migrated(conn)
         # WHOOP (skip cleanly when unconfigured)
         try:
             settings.require_whoop()

@@ -94,25 +94,49 @@ def pending_migrations(conn: sqlite3.Connection, directory: Path | None = None) 
     return [m for m in discover_migrations(directory) if m.version not in done]
 
 
+_TXN_CONTROL = frozenset({"BEGIN", "COMMIT", "ROLLBACK", "END"})
+
+
+def _only_comments(chunk: str) -> bool:
+    return all(
+        not ln.strip() or ln.strip().startswith("--") or ln.strip() == ";"
+        for ln in chunk.splitlines()
+    )
+
+
 def _split_statements(sql: str) -> list[str]:
     """Split a migration file into individual SQL statements.
 
-    Uses :func:`sqlite3.complete_statement` (semicolon-aware, string/comment
-    safe) so statements can run one-by-one inside a single explicit
-    transaction — unlike ``executescript``, which issues an implicit COMMIT
-    first and leaves partial DDL behind when a later statement fails.
+    Tests :func:`sqlite3.complete_statement` at every ``;`` (string/comment
+    safe), so multiple statements sharing a line split correctly — unlike a
+    line-based split, and unlike ``executescript``, which issues an implicit
+    COMMIT first and leaves partial DDL behind when a later statement fails.
+
+    Migration files must NOT contain their own transaction control
+    (BEGIN/COMMIT/ROLLBACK) — the runner owns the transaction (one per file,
+    all-or-nothing). Violations raise ValueError instead of failing cryptically
+    mid-apply.
     """
     stmts: list[str] = []
     buf = ""
-    for line in sql.splitlines(keepends=True):
-        buf += line
+    pieces = sql.split(";")
+    for i, piece in enumerate(pieces):
+        last = i == len(pieces) - 1
+        buf += piece if last else piece + ";"
         if sqlite3.complete_statement(buf):
-            stmts.append(buf.strip())
+            chunk = buf.strip()
             buf = ""
+            if not chunk or _only_comments(chunk):
+                continue
+            first_word = chunk.split(None, 1)[0].rstrip(";").upper()
+            if first_word in _TXN_CONTROL:
+                raise ValueError(
+                    "migration files must not contain their own transaction control "
+                    f"({first_word}); the migration runner owns the transaction"
+                )
+            stmts.append(chunk)
     tail = buf.strip()
-    if tail and any(
-        ln.strip() and not ln.strip().startswith("--") for ln in tail.splitlines()
-    ):
+    if tail and not _only_comments(tail):
         stmts.append(tail)  # trailing statement missing its semicolon
     return stmts
 

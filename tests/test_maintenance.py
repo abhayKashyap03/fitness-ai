@@ -77,7 +77,29 @@ def test_auto_since_backs_off_overlap(migrated_conn):
         external_id="r1",
         recorded_at="2026-06-10T08:00:00.000Z",
     )
-    assert auto_since(migrated_conn, overlap_days=2) == "2026-06-08T08:00:00+00:00"
+    assert auto_since(migrated_conn, overlap_days=2) == "2026-06-08T08:00:00Z"
+
+
+def test_auto_since_uses_min_across_record_types(migrated_conn):
+    # an interrupted ingest can leave one type behind; watermark must follow
+    # the LAGGING type so nothing is stranded past it
+    insert_raw_event(
+        migrated_conn,
+        source="whoop_api",
+        record_type="recovery",
+        payload={"a": 2},
+        external_id="r2",
+        recorded_at="2026-06-15T08:00:00.000Z",
+    )
+    insert_raw_event(
+        migrated_conn,
+        source="whoop_api",
+        record_type="workout",
+        payload={"b": 1},
+        external_id="w1",
+        recorded_at="2026-06-10T08:00:00.000Z",
+    )
+    assert auto_since(migrated_conn, overlap_days=2) == "2026-06-08T08:00:00Z"
 
 
 def test_auto_since_ignores_other_sources(migrated_conn):

@@ -41,23 +41,32 @@ def _ingest_records(
 
 
 def auto_since(conn: sqlite3.Connection, *, overlap_days: int = 2) -> str | None:
-    """Derive an incremental ``since`` from the newest ingested WHOOP record.
+    """Derive an incremental ``since`` from already-ingested WHOOP records.
 
-    Backs off ``overlap_days`` so late-arriving edits inside the window are
-    re-fetched — overlap is free because ingest dedups on payload_hash. Returns
-    None when no WHOOP data exists yet (caller must demand an explicit
-    ``--since`` rather than silently guessing a backfill window).
+    Watermark = the MIN across record types of each type's newest
+    ``recorded_at`` — a single global MAX could silently skip a type that an
+    interrupted ingest never reached (recovery lands first; a crash before
+    workouts would strand them past the watermark forever). Backs off
+    ``overlap_days`` on top; overlap is free because ingest dedups on
+    payload_hash. Returns None when no WHOOP data exists yet (caller must
+    demand an explicit ``--since`` rather than silently guessing a backfill
+    window). Emitted in RFC3339 ``Z`` form, matching WHOOP's documented format.
     """
     from datetime import timedelta
 
     from ...timeutil import parse_instant, to_utc_iso
 
     row = conn.execute(
-        "SELECT MAX(recorded_at) AS m FROM raw_events WHERE source='whoop_api'"
+        "SELECT MIN(m) AS watermark FROM ("
+        "  SELECT MAX(recorded_at) AS m FROM raw_events"
+        "  WHERE source='whoop_api' AND recorded_at IS NOT NULL"
+        "  GROUP BY record_type"
+        ")"
     ).fetchone()
-    if row is None or row["m"] is None:
+    if row is None or row["watermark"] is None:
         return None
-    return to_utc_iso(parse_instant(row["m"]) - timedelta(days=overlap_days))
+    since = to_utc_iso(parse_instant(row["watermark"]) - timedelta(days=overlap_days))
+    return since.replace("+00:00", "Z")
 
 
 def ingest_whoop(

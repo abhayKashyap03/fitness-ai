@@ -10,8 +10,10 @@ HealthKit is our weight/body source; food comes from the MFP CSV adapter
 (Phase 6). See docs/healthkit-export-notes.md for the observed format.
 
 Design notes:
-  * Weight/lean mass arrive in **pounds** (`lb`) and are converted to kg.
-    BodyFat is a **percent** (0-100) and is stored as-is.
+  * Mass conversion is **unit-aware** (lb/kg/g/oz/st -> kg, per-record `unit`
+    attribute; the observed export is lb throughout but HealthKit permits any).
+    Unknown units skip the record (§2.7: absence over garbage). BodyFat is
+    normalized to percent (0-100); 0-1 fractions are rescaled.
   * Each HealthKit ``<Record>`` carries exactly ONE metric, so one record maps
     to a *partial* row (one of weight/bf/lean set). The impure runner merges
     partials sharing an identity (source_app + instant) into one

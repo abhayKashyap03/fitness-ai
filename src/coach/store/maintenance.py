@@ -44,11 +44,18 @@ def backup_db(conn: sqlite3.Connection, db_path: Path, dest: Path | None = None)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         raise FileExistsError(f"refusing to overwrite existing backup: {dest}")
-    target = sqlite3.connect(dest)
+    # write to a .part temp, atomically rename on success — a failed backup must
+    # never leave a partial file that looks like a valid snapshot
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    target = sqlite3.connect(tmp)
     try:
         conn.backup(target)
-    finally:
         target.close()
+        tmp.replace(dest)
+    except BaseException:
+        target.close()
+        tmp.unlink(missing_ok=True)
+        raise
     return dest
 
 
@@ -71,10 +78,16 @@ def verify_db(conn: sqlite3.Connection) -> VerifyReport:
             counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         except sqlite3.OperationalError:
             counts[table] = -1  # table missing (pre-migration db)
+    try:
+        fingerprint = canonical_fingerprint(conn)
+    except sqlite3.OperationalError:
+        # pre-migration DB: canonical tables absent — same state the counts
+        # loop already reports as -1; don't crash the very tool that checks it
+        fingerprint = "unavailable (canonical tables missing — run `coach db init`)"
     return VerifyReport(
         ok=(integrity == "ok" and not fk),
         integrity=integrity,
         fk_violations=len(fk),
         row_counts=counts,
-        canonical_fingerprint=canonical_fingerprint(conn),
+        canonical_fingerprint=fingerprint,
     )
