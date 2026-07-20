@@ -189,14 +189,22 @@ provenance (`source`) + explicit null/insufficient; no prose, no math (§2.2).
 weight-loss-rate alert off the EWMA trend (warn >1%/wk, critical >1.5%/wk),
 1200 kcal floor clamp. Surfaced via the `get_safety_flags` tool.
 
-### [~] T4.2 — Grounding harness (authored; live eval gated)
+### [x] T4.2 — Grounding harness (built; live run = human step)
 `src/coach/coach/grounding.py` — `SYSTEM_PROMPT` faithfulness contract +
 fabrication-risk `SCENARIOS` + `admits_absence`/`fabricated_numbers` helpers.
-**Substrate guarantee tested** (no tokens, §6.2): every absence scenario's tool
-output is honestly null/insufficient. **Live-model eval remains** — needs the
-Anthropic SDK (§6.4 sign-off) + token spend (§8.7); `run_live_grounding` is a
-gated manual runner (raises; never in pytest). Zero-fabrication target verified
-against the live model when you wire that up.
+Substrate guarantee tested (no tokens, §6.2); `run_live_grounding` fully
+implemented (fresh in-memory DB per scenario, real tool contract, injectable
+transport — harness itself offline-tested). **Human step remaining:** put
+`ANTHROPIC_API_KEY` in `.env`, run `coach eval grounding` (burns tokens §8.7);
+target = zero fabrications.
+
+### [x] T4.3 — `coach ask` (the actual coach)
+`coach/llm.py` (stdlib-only urllib Messages client — no SDK, §6.4; injectable
+transport, bounded retries, prompt caching §8.7, no secrets logged §8.4) +
+`coach/agent.py` (bounded loop MAX_ROUNDS=8; refusal/pause_turn/max_tokens/
+unknown-tool handled explicitly). CLI: `coach ask "…" [--show-tools]`,
+`coach eval grounding`. `COACH_MODEL` default claude-opus-4-8 (overridable).
+**Live verification pending** (needs ANTHROPIC_API_KEY).
 
 ---
 
