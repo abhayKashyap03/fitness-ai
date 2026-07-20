@@ -40,6 +40,26 @@ def _ingest_records(
     return inserted, skipped
 
 
+def auto_since(conn: sqlite3.Connection, *, overlap_days: int = 2) -> str | None:
+    """Derive an incremental ``since`` from the newest ingested WHOOP record.
+
+    Backs off ``overlap_days`` so late-arriving edits inside the window are
+    re-fetched — overlap is free because ingest dedups on payload_hash. Returns
+    None when no WHOOP data exists yet (caller must demand an explicit
+    ``--since`` rather than silently guessing a backfill window).
+    """
+    from datetime import timedelta
+
+    from ...timeutil import parse_instant, to_utc_iso
+
+    row = conn.execute(
+        "SELECT MAX(recorded_at) AS m FROM raw_events WHERE source='whoop_api'"
+    ).fetchone()
+    if row is None or row["m"] is None:
+        return None
+    return to_utc_iso(parse_instant(row["m"]) - timedelta(days=overlap_days))
+
+
 def ingest_whoop(
     conn: sqlite3.Connection,
     client: WhoopClient,
