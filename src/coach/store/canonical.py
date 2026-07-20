@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from ..normalize.healthkit import WeightPartial
 from ..normalize.whoop import RecoveryRow, WorkoutRow
 
 
@@ -94,6 +95,48 @@ def upsert_workout(
     return wid
 
 
+def weight_id(external_id: str) -> str:
+    """Deterministic id from the raw event's (already deterministic) external_id.
+
+    One canonical row per HealthKit body ``<Record>`` -> 1:1 ``raw_ref`` (§2.1).
+    """
+    return f"wt:{external_id}"
+
+
+def upsert_weight(
+    conn: sqlite3.Connection,
+    row: WeightPartial,
+    *,
+    source: str,
+    raw_ref: str,
+    external_id: str,
+    derived_at: str,
+) -> str:
+    wid = weight_id(external_id)
+    conn.execute(
+        "INSERT OR REPLACE INTO weight_measurement (id, user_id, day_key, source, "
+        "source_app, measured_at, tz_name, utc_offset, weight_kg, body_fat_pct, "
+        "lean_mass_kg, raw_ref, derived_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            wid,
+            row.user_id,
+            row.day_key,
+            source,
+            row.source_app,
+            row.measured_at,
+            row.tz_name,
+            row.utc_offset,
+            row.weight_kg,
+            row.body_fat_pct,
+            row.lean_mass_kg,
+            raw_ref,
+            derived_at,
+        ),
+    )
+    return wid
+
+
 def canonical_fingerprint(conn: sqlite3.Connection) -> str:
     """Stable digest of all canonical rows EXCLUDING volatile ``derived_at``.
 
@@ -114,5 +157,11 @@ def canonical_fingerprint(conn: sqlite3.Connection) -> str:
         "strain,distance_m,hr_zones_json,session_group_id,dedupe_hash,raw_ref"
     )
     for r in conn.execute(f"SELECT {wk_cols} FROM workout ORDER BY id"):
+        parts.append("|".join("" if v is None else str(v) for v in r))
+    wt_cols = (
+        "id,user_id,day_key,source,source_app,measured_at,tz_name,utc_offset,"
+        "weight_kg,body_fat_pct,lean_mass_kg,raw_ref"
+    )
+    for r in conn.execute(f"SELECT {wt_cols} FROM weight_measurement ORDER BY id"):
         parts.append("|".join("" if v is None else str(v) for v in r))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
