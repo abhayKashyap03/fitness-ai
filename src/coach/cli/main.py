@@ -131,6 +131,24 @@ def _cmd_ingest_whoop(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ingest_healthkit(settings: Settings, args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from ..adapters.healthkit.ingest import ingest_healthkit
+
+    path = Path(args.file)
+    if not path.exists():
+        print(f"Export not found: {path}", file=sys.stderr)
+        return 2
+    conn = db.connect(settings.db_path)
+    try:
+        result = ingest_healthkit(conn, path, user_id=settings.user_id)
+    finally:
+        conn.close()
+    print(f"  healthkit (body)   inserted={result['inserted']:4d} skipped={result['skipped']:4d}")
+    return 0
+
+
 def _cmd_normalize(settings: Settings, args: argparse.Namespace) -> int:
     conn = db.connect(settings.db_path)
     try:
@@ -246,6 +264,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_iw.add_argument("--since", required=True, help="ISO date/datetime start of window")
     p_iw.add_argument("--until", default=None, help="ISO date/datetime end (optional)")
     p_iw.set_defaults(func=_cmd_ingest_whoop)
+
+    p_ih = ingest_sub.add_parser(
+        "healthkit", help="ingest Apple Health body/weight from an export (.xml/.zip)"
+    )
+    p_ih.add_argument("--file", required=True, help="path to export.xml or export.zip")
+    p_ih.set_defaults(func=_cmd_ingest_healthkit)
 
     p_norm = sub.add_parser("normalize", help="derive canonical tables from raw")
     p_norm.add_argument("--rebuild", action="store_true", help="drop + re-derive all")

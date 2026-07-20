@@ -11,8 +11,9 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from ..store.canonical import upsert_recovery, upsert_workout
+from ..store.canonical import upsert_recovery, upsert_weight, upsert_workout
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
+from .healthkit import parse_body_record
 from .whoop import parse_recovery, parse_workout
 
 
@@ -47,6 +48,7 @@ def normalize_all(
     if rebuild:
         conn.execute("DELETE FROM recovery")
         conn.execute("DELETE FROM workout")
+        conn.execute("DELETE FROM weight_measurement")
 
     offsets = _cycle_offsets(conn)
 
@@ -71,9 +73,44 @@ def normalize_all(
         upsert_workout(conn, wrow, raw_ref=r["id"], derived_at=derived_at)
         n_wk += 1
 
+    n_wt = _normalize_healthkit_weight(conn, user_id, derived_at)
+
     n_groups = _regroup_workouts(conn, tolerance_s)
     conn.commit()
-    return {"recovery": n_rec, "workout": n_wk, "workout_groups": n_groups}
+    return {
+        "recovery": n_rec,
+        "workout": n_wk,
+        "weight": n_wt,
+        "workout_groups": n_groups,
+    }
+
+
+def _normalize_healthkit_weight(
+    conn: sqlite3.Connection, user_id: int, derived_at: str
+) -> int:
+    """Derive weight_measurement rows from raw HealthKit body records.
+
+    One canonical row per raw body ``<Record>`` (1:1 raw_ref, §2.1). BMI and
+    missing-value records parse to None and are skipped (§2.7).
+    """
+    n = 0
+    for r in conn.execute(
+        "SELECT id, external_id, payload FROM raw_events WHERE source='healthkit'"
+    ).fetchall():
+        payload = json.loads(r["payload"])
+        partial = parse_body_record(payload, user_id=user_id)
+        if partial is None:
+            continue
+        upsert_weight(
+            conn,
+            partial,
+            source="healthkit",
+            raw_ref=r["id"],
+            external_id=r["external_id"],
+            derived_at=derived_at,
+        )
+        n += 1
+    return n
 
 
 def _regroup_workouts(conn: sqlite3.Connection, tolerance_s: int) -> int:
