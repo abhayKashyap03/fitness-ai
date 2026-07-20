@@ -358,13 +358,17 @@ subscription** — a Pro/Max plan grants no API access.
   Store the offset in `utc_offset`; keep `tz_name` strictly IANA and **NULL**
   when unknown. Never fabricate a zone name from an offset. `day_key` is derived
   from instant + offset and is exact regardless. HealthKit may backfill true
-  IANA later. *(ADR pending — write it.)*
+  IANA later. → [ADR-0006](docs/adr/0006-timezone-offset-vs-iana.md).
 - **D2 — Calories-burned precedence.** Wearable "calories out" never drives
   anything important; adaptive TDEE stays on weight-trend + intake. When sources
   conflict, **display the range, don't pick a winner** — fake precision is worse
   than an honest range, especially with the coach reasoning on top. Per-workout
-  display ranking is strap > wrist > machine, labeled approximate. *(ADR
-  pending — write it.)*
+  display ranking is strap > wrist > machine, labeled approximate. →
+  [ADR-0007](docs/adr/0007-calorie-burned-precedence.md).
+- **D3 — HealthKit sub-source namespacing.** Multiple apps write the same metric
+  under `source='healthkit'` (OKOK scale vs MFP weight). Keep them sibling rows,
+  distinguished by a non-destructive `source_app` column; resolve at read time.
+  → [ADR-0008](docs/adr/0008-healthkit-source-app.md).
 
 ---
 
