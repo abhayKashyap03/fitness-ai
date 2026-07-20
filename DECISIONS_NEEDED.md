@@ -12,48 +12,49 @@ _(empty — nothing blocked)_
 Recently resolved:
 - **D1 — WHOOP timezone (offset vs IANA)** → [ADR-0006](docs/adr/0006-timezone-offset-vs-iana.md)
 - **D2 — Calories-burned precedence** → [ADR-0007](docs/adr/0007-calorie-burned-precedence.md)
+- **D3 — HealthKit sub-source namespacing (`source_app`)** → [ADR-0008](docs/adr/0008-healthkit-source-app.md) (option 1, per handoff; shipped in migration 0005)
 
 ---
 
-## D3 — How to namespace HealthKit sub-sources (MyFitnessPal / Foodnoms / OKOK scale) 🔒
+## D4 — MyFitnessPal food ingestion path + the `raw_events.source` CHECK 🔒
 
-**Context (from T5.1 recon):** the export has multiple apps writing the same
-metric — two food loggers (MyFitnessPal per-meal, Foodnoms per-item) and
-multiple weight writers (OKOK scale + MyFitnessPal). Per §2.3 these must stay
-**sibling rows** and resolve at read time, so we need to tell them apart by
-`source`.
+**Context (2026-07-19c):** HealthKit nutrition is unusable — MFP stopped writing
+to Apple Health after Oct 2025 (Premium paywalled the sync), leaving only 5
+logged days in the whole export. The user's real Feb–June food history lives on
+MFP and comes out via MFP's **Privacy Center "Download My Data"** full export
+(CSV, free, legal data-portability — **not** the closed API, **not** scraping;
+CLAUDE.md §12 updated). Zip expected ~2026-07-20. Plan: build
+`src/coach/adapters/mfp/` reading that CSV.
 
-**The constraint:** `raw_events.source` is a fixed `CHECK (source IN (...))`
-list that includes bare `healthkit` but not `healthkit:myfitnesspal`. SQLite
-**cannot ALTER a CHECK** — widening it means rebuilding `raw_events`, which
-**holds real WHOOP data**. §8.5 / §5 forbid dropping a table with real data
-unattended. So I did **not** touch `raw_events`.
+**The constraint:** per §2.1 the CSV must land in `raw_events` verbatim, but
+`raw_events.source` is a fixed `CHECK (source IN ('whoop_api','whoop_ble',
+'healthkit','health_connect','withings','strava','oura','garmin','manual'))` —
+**no `myfitnesspal`**. SQLite can't ALTER a CHECK; admitting a new source means
+**rebuilding `raw_events`, which holds real WHOOP data** → §8.5 human sign-off.
+(`food_entry.source` has the same gap but that table is **empty/disposable**, so
+its CHECK can be rebuilt freely — the raw table is the only hard part.)
 
-**What I did (safe, no migration):** T5.3 will store HealthKit rows with
-`raw_events.source = 'healthkit'` (already allowed), preserve the app name in the
-payload (`sourceName`), and make `external_id` a deterministic hash of
-`(type, sourceName, startDate, value)` so MFP vs Foodnoms vs OKOK never collide.
-Raw stays sacred and untouched.
+**Deeper issue:** this CHECK list contradicts §2.5 ("adding a source should be a
+new adapter file, not a schema change"). Every future adapter hits this wall.
 
-**The open question — canonical sibling distinction (blocks clean T5.4):**
-`food_entry.source` / `weight_measurement.source` also have fixed CHECK lists
-(both include bare `healthkit`). To keep OKOK-scale weight and MFP weight as
-distinct siblings we need a per-app discriminator. Options:
+**Options:**
+1. **(Recommended, minimal) One human-approved migration** rebuilds `raw_events`
+   with `'myfitnesspal'` added to the CHECK, preserving every existing row via
+   `INSERT INTO ... SELECT` and asserting row-count parity before/after. Raw data
+   fully preserved; done once under review. Gets MFP flowing fastest.
+2. **(Recommended, aligned — do as follow-up ADR) Replace the source CHECK with a
+   `sources` reference table + FK.** Adding an adapter becomes an INSERT, not a
+   DDL rebuild — satisfies §2.5. More work now; kills this whole class of blocker.
+   Still a raw_events rebuild (needs sign-off), so fold it into the same reviewed
+   migration as option 1 if you want it done right the first time.
+3. Store MFP raw under an existing allowed value (`'manual'`) with the app in the
+   payload. **Rejected** — `'manual'` means hand-entered; violates provenance
+   (§2.3) and source-agnostic honesty.
 
-1. **(Recommended) Add a non-destructive `source_app` column** to `food_entry`
-   and `weight_measurement` via `ALTER TABLE ADD COLUMN` (the same safe pattern
-   as migration 0004's `utc_offset`). Keep `source='healthkit'`, set
-   `source_app='myfitnesspal'|'foodnoms'|'okok'`. Resolver views add `source_app`
-   to their precedence ordering. No table rebuild, no CHECK problem, raw
-   untouched. Clean and reversible.
-2. Rebuild `food_entry`/`weight_measurement` (both currently **empty**,
-   disposable canonical) with a broadened `source LIKE 'healthkit:%'` CHECK, and
-   use `source='healthkit:okok'` etc. More faithful to the `healthkit:<app>`
-   naming in TASKS_PHASE5, but rebuilds tables + dependent views.
-3. Collapse all HealthKit into `source='healthkit'` and accept that MFP-weight
-   and scale-weight are **not** distinguished. **Rejected** — breaks the
-   multi-source sibling requirement (§2.3) the recon specifically found.
+**Recommendation:** option 1 to unblock, **or** option 1+2 combined in one
+reviewed migration if you'd rather fix the root cause now. Either way this needs
+your explicit sign-off (raw_events rebuild) — the next session will prep the
+migration with row-count assertions and wait for approval, not run it unattended.
+Independent of this, MFP **recon** and the pure `food_entry` normalizer can be
+built first (no raw_events write).
 
-**Recommendation: option 1.** It's a two-way door, non-destructive, and mirrors
-an existing accepted pattern (0004). I stopped here rather than pick a schema
-shape that's awkward to reverse. Pick one and T5.4 proceeds.

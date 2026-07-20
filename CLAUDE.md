@@ -416,8 +416,8 @@ Clean seams: yes. Premature machinery: no.
 |---|---|
 | WHOOP Cloud API | ✅ Free OAuth 2.0 (v2). ~100 req/min. Requires active membership. Recovery *formula* is proprietary — we get the score + inputs, not the weighting. Supplies UTC offset, not IANA zone. |
 | WHOOP local BLE | ⚠️ Unofficial, open-source, 5.0 MG unproven |
-| MyFitnessPal | ❌ **Closed to new developers. Do not design around it. Scraping violates ToS.** |
-| Apple HealthKit / Google Health Connect | ✅ But **not readable from a laptop** — data lives on-device. Bridge via Health export (XML zip) or an auto-export app writing to a folder. |
+| MyFitnessPal | API ❌ **closed; scraping violates ToS — do not.** BUT the user's own **Privacy Center → "Download My Data"** full CSV export (CCPA/GDPR data-portability) is ✅ a sanctioned path and is our **actual nutrition source** — MFP's Reports export is 7-day/Premium-gated, so use the privacy export. Ingest the CSV the user provides; never automate login or scrape. |
+| Apple HealthKit / Google Health Connect | ✅ But **not readable from a laptop** — data lives on-device. Bridge via Health export (XML zip). **Weight/body-comp source only** — MFP paywalled its Apple Health *nutrition* sync (~2024–25), so food does NOT reliably reach the export (n=1: 5 dietary days total, dead after 2026-02). |
 | USDA FoodData Central / Open Food Facts | ✅ Free, open — the intended nutrition DB path |
 | Smart scale | ⚠️ Brand-dependent; Withings has an API, most others route through the health platforms |
 

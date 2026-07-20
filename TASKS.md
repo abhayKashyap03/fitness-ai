@@ -224,10 +224,13 @@ Before you stop (or when the window is nearly exhausted):
 
 ---
 
-## Phase 5 — Apple Health ingestion (nutrition + weight)
+## Phase 5 — Apple Health ingestion (WEIGHT / body-comp only)
 
-Full spec in `TASKS_PHASE5.md`. Apple Health is our nutrition source (MFP writes
-into it) and our ONLY weight source. Work in order; recon before code.
+Full spec in `TASKS_PHASE5.md`. **Scope revised 2026-07-19c:** Apple Health is
+our **weight/body-comp** source only. It is NOT a usable nutrition source — MFP
+stopped writing food to Apple Health after Oct 2025 (Premium paywall), leaving
+only 5 dietary days in the whole export. **Food moved to Phase 6 (MFP CSV).**
+Work in order; recon before code.
 
 - [x] **T5.0 — Protect the export file** 🔒 — `apple_health_export/` gitignored
   (`.gitignore:56`, rule committed), never tracked/staged/committed. Export now
@@ -237,16 +240,48 @@ into it) and our ONLY weight source. Work in order; recon before code.
   per-item); macros present 100% of energy-days; weight RICH (OKOK scale + MFP,
   unit **lb**); multi-source BodyMass → siblings; **real IANA via `HKTimeZone`
   on dietary rows only** (startDate offset unreliable) — day_key from HKTimeZone.
-- [ ] **T5.2 — Streaming XML parser** — `iterparse`, flat memory, nutrition +
+- [x] **T5.2 — Streaming XML parser** — `iterparse`, flat memory, nutrition +
   body only; skip workouts/HR/steps/sleep; read MetadataEntry before clearing.
-- [ ] **T5.3 — Raw ingestion** — verbatim to `raw_events`; `source` =
-  `healthkit:<app>`; deterministic `external_id` from `(type,sourceName,startDate,
-  value)`; idempotent; migration to widen source CHECK.
-- [ ] **T5.4 — Normalizers** — `food_entry` + `weight_measurement`; lb→kg, BodyFat
-  %; §2.7 (no zero-fill); siblings kept (§2.3); dietary day_key from HKTimeZone.
-- [ ] **T5.5 — Timezone backfill** — populate `tz_name` (IANA) for dietary rows
-  from `HKTimeZone`; body rows NULL; cross-source WHOOP backfill → DECISIONS_NEEDED.
-- [ ] **T5.6 — CLI** — `coach ingest healthkit --file <path>` (.xml/.zip).
-- [ ] **T5.7 — Verify against real data** — `coach status` / `coach tdee`.
-- [ ] **T5.8 — Fixtures** — small scrubbed synthetic from the OBSERVED format
-  (§6.2). Never commit any slice of the real export.
+  (Merged in PR #5.)
+- [x] **T5.3 — Raw ingestion** — verbatim to `raw_events`; `source='healthkit'`
+  (already in CHECK — no raw rebuild needed); deterministic `external_id` from
+  `(type,sourceName,startDate,value)`; idempotent. **Body-only** (dietary skipped;
+  food = MFP CSV). `adapters/healthkit/ingest.py`. Verified: 1410 body records
+  from the real 1.1 GB export in ~7s.
+- [x] **T5.4 — Normalizer (WEIGHT)** — `weight_measurement`: lb→kg, BodyFat %,
+  LeanMass; §2.7 (no zero-fill); OKOK vs MFP-weight kept as siblings (§2.3) via
+  `source_app` (D3/ADR-0008). One canonical row per HK record (1:1 raw_ref).
+- [x] **T5.5 — Timezone** — body rows have no `HKTimeZone` → `tz_name` NULL,
+  `utc_offset` from startDate; `day_key` exact regardless (§2.6).
+- [x] **T5.6 — CLI** — `coach ingest healthkit --file <path>` (.xml/.zip);
+  wired into `coach normalize` (+ `--rebuild`).
+- [x] **T5.7 — Verify against real data** — `coach status --date 2026-07-18`
+  shows `weight [healthkit]: 83.19kg (trend 82.60kg)`; 298 resolved days
+  (2023-07-06 → 2026-07-18). `coach tdee` correctly reports insufficient intake
+  (food lands Phase 6).
+- [x] **T5.8 — Fixtures** — synthetic body records covered by the existing
+  `tests/fixtures/healthkit/export_sample.xml` (labeled synthetic; OKOK+MFP
+  BodyMass, BodyFat, lb units), exercised by `test_healthkit_weight.py`.
+
+---
+
+## Phase 6 — MyFitnessPal nutrition (direct CSV adapter)
+
+**Why (2026-07-19c):** the real food history (consistent Feb–June logging) lives
+on MFP, not in Apple Health. Source = MFP **Privacy Center → "Download My Data"**
+full export (free, CCPA/GDPR; NOT the closed API, NOT scraping — §12). Zip
+expected ~2026-07-20. Work in order; **recon before code** (WHOOP-404 lesson).
+
+- [ ] **T6.0 — Receive + protect the export** — user drops CSV(s) in a gitignored
+  local dir (`data/mfp/`). Confirm never staged/committed (same rigor as T5.0).
+- [ ] **T6.1 — Recon** 🔒 — print structure ONLY (aggregate, §6.3): headers, date
+  format, meal grouping, macro columns, units, date range, distinct logged days.
+  Confirm the Feb–June month is present and gap-free. Assume nothing.
+- [ ] **T6.2 — Raw ingestion** — verbatim rows to `raw_events`. **Gated on D4**
+  (`raw_events.source` has no `myfitnesspal`; needs a sign-off migration).
+- [ ] **T6.3 — Normalizer** — pure `raw → food_entry`; day_key from CSV local
+  date; §2.7 no zero-fill; per-entry provenance. (Buildable + testable before D4.)
+- [ ] **T6.4 — CLI** — `coach ingest mfp --file <path>`.
+- [ ] **T6.5 — Verify** — `coach status`/`tdee` over the logged month; adaptive
+  TDEE should finally have an intake window to calibrate on.
+- [ ] **T6.6 — Fixtures** — small scrubbed synthetic from the OBSERVED CSV format.
