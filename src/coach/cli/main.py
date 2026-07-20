@@ -340,6 +340,68 @@ def _cmd_tdee(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- ask / eval ------------------------------------------------------------
+
+
+def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
+    from ..coach.agent import ask
+    from ..coach.llm import AnthropicClient, ApiError
+
+    try:
+        settings.require_anthropic()
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        client = AnthropicClient(settings.anthropic_api_key)
+        result = ask(
+            conn, client, args.question, model=settings.coach_model, user_id=settings.user_id
+        )
+    except ApiError as exc:
+        print(f"API error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+
+    if args.show_tools:
+        for c in result.tool_calls:
+            flag = "" if c.ok else "  [ERROR]"
+            print(f"  → {c.name}({c.args}){flag}", file=sys.stderr)
+    print(result.text)
+    u = result.usage
+    print(
+        f"\n[{settings.coach_model} · {result.rounds} round(s) · "
+        f"in={u.input_tokens} out={u.output_tokens} "
+        f"cache_read={u.cache_read_input_tokens}]",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _cmd_eval_grounding(settings: Settings, _args: argparse.Namespace) -> int:
+    """Live faithfulness eval (T4.2). Burns tokens — run deliberately, never in CI."""
+    from ..coach.grounding import run_live_grounding
+
+    try:
+        settings.require_anthropic()
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    results = run_live_grounding(settings.anthropic_api_key, model=settings.coach_model)
+    failed = 0
+    for r in results:
+        status = "PASS" if r["passed"] else "FAIL"
+        failed += int(not r["passed"])
+        print(f"  [{status}] {r['scenario']}  tools={r['tool_calls']} rounds={r['rounds']}")
+        if not r["passed"]:
+            print(f"         admits_absence={r['admits_absence']} fabricated={r['fabricated_numbers']}")
+            print(f"         answer: {r['answer'][:300]}")
+    print(f"{len(results) - failed}/{len(results)} scenarios passed (target: zero fabrications)")
+    return 0 if failed == 0 else 1
+
+
 # ---- doctor / sync ---------------------------------------------------------
 
 
@@ -512,6 +574,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_tdee.add_argument("--window", type=int, default=14, help="window length in days")
     p_tdee.add_argument("--json", action="store_true", help="machine-readable output")
     p_tdee.set_defaults(func=_cmd_tdee)
+
+    p_ask = sub.add_parser("ask", help="ask the coach a question (grounded in your data)")
+    p_ask.add_argument("question", help="the question, quoted")
+    p_ask.add_argument(
+        "--show-tools", action="store_true", help="print the tool calls made (to stderr)"
+    )
+    p_ask.set_defaults(func=_cmd_ask)
+
+    p_eval = sub.add_parser("eval", help="model evaluation harnesses (burns tokens)")
+    eval_sub = p_eval.add_subparsers(dest="eval_command", required=True)
+    p_eg = eval_sub.add_parser("grounding", help="live zero-fabrication eval (T4.2)")
+    p_eg.set_defaults(func=_cmd_eval_grounding)
 
     p_doctor = sub.add_parser("doctor", help="config/db/token/data sanity report")
     p_doctor.set_defaults(func=_cmd_doctor)

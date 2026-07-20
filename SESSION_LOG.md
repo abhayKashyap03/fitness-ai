@@ -25,6 +25,28 @@
 
 ---
 
+## Session 2026-07-20 (b) — revamp session 2: `coach ask` (branch `revamp/coach-ask`)
+
+Phase 4 completed: the coach actually coaches. **Zero new dependencies** —
+stdlib urllib Messages client (§6.4; no cloud SDK), injectable transport so
+tests never touch the network (§6.2), bounded retries honoring retry-after,
+prompt caching on SYSTEM_PROMPT (§8.7), secrets never logged (§8.4).
+
+- `coach/llm.py` client + `coach/agent.py` bounded loop (MAX_ROUNDS=8) over the
+  deterministic tool contract; refusal/pause_turn/max_tokens/unknown-tool/round-
+  exhaustion all explicit.
+- `run_live_grounding` implemented (was gated stub) — per-scenario fresh
+  in-memory DB, scored via admits_absence + fabricated_numbers (date-tolerant).
+- CLI: `coach ask "…" [--show-tools]`, `coach eval grounding` (exit 1 on any
+  fabrication). `COACH_MODEL` default claude-opus-4-8, overridable (§8.7).
+- Intentional test change (§6.2): `test_live_runner_is_gated` (asserted
+  NotImplementedError) replaced — the runner is now the feature; offline
+  coverage lives in `test_coach_agent.py` (fake transport).
+- 176 tests green; ruff + mypy clean.
+- **Human steps:** add `ANTHROPIC_API_KEY` to `.env`; run `coach ask "how am I
+  doing?" --show-tools` then `coach eval grounding` (burns tokens). Session 3
+  (BLE ADR, gap-aware EWMA, HRV validation harness, README) still queued.
+
 ## Session 2026-07-20 (a) — revamp session 1: correctness + friction (branch `revamp/core-upgrades`)
 
 User granted full creative latitude (reviews PR before merge). Three-session plan;
