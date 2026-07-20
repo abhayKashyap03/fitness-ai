@@ -25,6 +25,35 @@
 
 ---
 
+## Session 2026-07-20 (a) — revamp session 1: correctness + friction (branch `revamp/core-upgrades`)
+
+User granted full creative latitude (reviews PR before merge). Three-session plan;
+this is session 1 of 3. Sessions 2–3 queued: (2) `coach ask` agent loop via
+stdlib-only Anthropic REST client (no SDK dep — §6.4 stays pure) + live grounding;
+(3) BLE recon ADR, gap-aware EWMA (+ADR), HRV-validation harness, sleep table, README.
+
+### Done (session 1)
+- **Bug fix:** HealthKit mass conversion was unconditionally lb — a kg-unit record
+  would double-convert. Now unit-aware (lb/kg/g/oz/st; unknown unit -> row skipped,
+  §2.7); BodyFat 0–1-fraction guard.
+- **Migration atomicity:** executescript's implicit COMMIT left partial DDL on
+  mid-file failure. Now statement-split + one explicit transaction per migration.
+- **resp_rate enrichment:** recovery rows carry resp_rate_bpm joined from raw WHOOP
+  sleep by sleep_id (parse_recovery stays pure; synthetic sleep fixture, labeled).
+- **CLI:** `coach sync` (incremental auto-since WHOOP + HK if present + normalize),
+  `coach doctor`, `coach db backup|verify`, `--json` on status/tdee (emits the
+  coach tool-layer dicts — one contract), `--date`/`--end` default to today in
+  COACH_HOME_TZ. `ingest whoop --since` now optional (incremental).
+- **Multi-agent review over the diff** (3 lenses + adversarial verify): 13 raw
+  findings, 4 confirmed empirically + 5 self-verified. All fixed: doctor/verify
+  no longer crash on an unmigrated DB (doctor now read-only), write-path
+  commands auto-migrate, splitter handles statements sharing a line + rejects
+  in-file BEGIN/COMMIT, atomic .part backup, per-type auto_since watermark ('Z'
+  form), deterministic resp_rate sibling pick, weight_skipped surfaced.
+- 161 tests green; ruff + mypy clean.
+- **User's real DB confirmed live:** doctor shows whoop_api 354 + healthkit 1410
+  raw rows (user ran the ingest themselves).
+
 ## Session 2026-07-19 (e) — Phase 4 pre-work while MFP CSV pending
 
 Branch `phase4/coach-layer` (stacked on merged #6). Food-independent Phase-4 work.
