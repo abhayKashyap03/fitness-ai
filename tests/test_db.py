@@ -43,6 +43,74 @@ def test_migrate_applies_all_then_idempotent(db_path: Path):
         conn.close()
 
 
+def test_failed_migration_is_atomic(tmp_path: Path, db_path: Path):
+    """A migration failing mid-file must leave NONE of its statements applied."""
+    mdir = tmp_path / "migrations"
+    mdir.mkdir()
+    (mdir / "0001_good.sql").write_text("CREATE TABLE a (x INTEGER);\n")
+    (mdir / "0002_broken.sql").write_text(
+        "CREATE TABLE b (x INTEGER);\nCREATE TABLE b (x INTEGER);\n"  # dup -> fails
+    )
+    conn = db.connect(db_path)
+    try:
+        import pytest as _pytest
+
+        with _pytest.raises(Exception, match="already exists"):
+            db.migrate(conn, mdir)
+        # 0001 committed; 0002 fully rolled back — b must NOT exist
+        assert db.current_version(conn) == 1
+        tables = {
+            r["name"]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "a" in tables
+        assert "b" not in tables
+        # fixing the file lets a re-run resume cleanly
+        (mdir / "0002_broken.sql").write_text("CREATE TABLE b (x INTEGER);\n")
+        assert [m.version for m in db.migrate(conn, mdir)] == [2]
+        assert db.current_version(conn) == 2
+    finally:
+        conn.close()
+
+
+def test_split_statements_shares_a_line(tmp_path: Path, db_path: Path):
+    """Two statements on one line must split and apply (line-based split broke this)."""
+    mdir = tmp_path / "migrations"
+    mdir.mkdir()
+    (mdir / "0001_oneline.sql").write_text("CREATE TABLE a (x INTEGER); CREATE TABLE b (y TEXT);\n")
+    conn = db.connect(db_path)
+    try:
+        db.migrate(conn, mdir)
+        tables = {
+            r["name"]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert {"a", "b"} <= tables
+    finally:
+        conn.close()
+
+
+def test_migration_own_transaction_control_rejected(tmp_path: Path, db_path: Path):
+    """Runner owns the transaction; BEGIN/COMMIT in a file must fail loudly."""
+    import pytest as _pytest
+
+    mdir = tmp_path / "migrations"
+    mdir.mkdir()
+    (mdir / "0001_txn.sql").write_text("BEGIN;\nCREATE TABLE a (x INTEGER);\nCOMMIT;\n")
+    conn = db.connect(db_path)
+    try:
+        with _pytest.raises(ValueError, match="transaction control"):
+            db.migrate(conn, mdir)
+    finally:
+        conn.close()
+
+
+def test_split_statements_semicolon_in_string_literal():
+    stmts = db._split_statements("INSERT INTO t VALUES ('a;b'); CREATE TABLE u (x);\n")
+    assert len(stmts) == 2
+    assert "a;b" in stmts[0]
+
+
 def test_core_tables_and_views_exist(migrated_conn):
     names = {
         r["name"]

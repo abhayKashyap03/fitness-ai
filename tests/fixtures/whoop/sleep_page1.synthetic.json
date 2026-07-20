@@ -1,0 +1,18 @@
+{
+  "_synthetic": "SYNTHETIC fixture (CLAUDE.md §6.2) — fabricated sleep records, NOT a recorded API response. Minimal shape: only the fields the normalizer join reads (id, score.respiratory_rate), ids matched to the real scrubbed recovery fixtures' sleep_id values.",
+  "records": [
+    {
+      "id": "18271190-0064-4ff1-a66b-02b87b3285ca",
+      "end": "2026-06-01T14:32:32.563Z",
+      "score_state": "SCORED",
+      "score": { "respiratory_rate": 16.25 }
+    },
+    {
+      "id": "7b5b5631-0bf9-4ab5-b384-0f106b43ced9",
+      "end": "2026-06-02T13:11:04.120Z",
+      "score_state": "SCORED",
+      "score": { "respiratory_rate": 15.8 }
+    }
+  ],
+  "next_token": null
+}

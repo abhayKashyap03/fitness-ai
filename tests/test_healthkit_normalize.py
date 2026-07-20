@@ -12,8 +12,20 @@ from coach.normalize.healthkit import (
 )
 
 
-def _rec(rtype: str, value, source="OKOK·International Version", start="2026-01-02 07:00:00 -0500"):
-    return {"type": rtype, "value": value, "source_name": source, "start_date": start}
+def _rec(
+    rtype: str,
+    value,
+    source="OKOK·International Version",
+    start="2026-01-02 07:00:00 -0500",
+    unit="lb",
+):
+    return {
+        "type": rtype,
+        "value": value,
+        "source_name": source,
+        "start_date": start,
+        "unit": unit,
+    }
 
 
 # ---- app_slug --------------------------------------------------------------
@@ -82,6 +94,34 @@ def test_lean_mass_lb_to_kg():
 
 def test_bmi_is_skipped():
     assert parse_body_record(_rec("HKQuantityTypeIdentifierBodyMassIndex", 24.1)) is None
+
+
+# ---- unit awareness (a kg record must NOT be lb-converted) -----------------
+
+
+def test_kg_unit_passes_through_unconverted():
+    row = parse_body_record(_rec("HKQuantityTypeIdentifierBodyMass", 83.2, unit="kg"))
+    assert row is not None
+    assert row.weight_kg == pytest.approx(83.2)
+
+
+def test_gram_unit_scales():
+    row = parse_body_record(_rec("HKQuantityTypeIdentifierBodyMass", 83200, unit="g"))
+    assert row is not None
+    assert row.weight_kg == pytest.approx(83.2)
+
+
+def test_unknown_mass_unit_skipped_not_garbage():
+    # §2.7: better absent than silently mis-converted
+    assert parse_body_record(_rec("HKQuantityTypeIdentifierBodyMass", 83.2, unit="furlong")) is None
+    assert parse_body_record(_rec("HKQuantityTypeIdentifierBodyMass", 83.2, unit=None)) is None
+
+
+def test_body_fat_fraction_normalized_to_percent():
+    # some writers export 0-1 fractions; 18.5% must come out either way
+    row = parse_body_record(_rec("HKQuantityTypeIdentifierBodyFatPercentage", 0.185, unit="%"))
+    assert row is not None
+    assert row.body_fat_pct == pytest.approx(18.5)
 
 
 def test_missing_value_yields_none_not_zero():

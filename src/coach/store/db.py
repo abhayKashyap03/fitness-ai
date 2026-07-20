@@ -94,19 +94,69 @@ def pending_migrations(conn: sqlite3.Connection, directory: Path | None = None) 
     return [m for m in discover_migrations(directory) if m.version not in done]
 
 
+_TXN_CONTROL = frozenset({"BEGIN", "COMMIT", "ROLLBACK", "END"})
+
+
+def _only_comments(chunk: str) -> bool:
+    return all(
+        not ln.strip() or ln.strip().startswith("--") or ln.strip() == ";"
+        for ln in chunk.splitlines()
+    )
+
+
+def _split_statements(sql: str) -> list[str]:
+    """Split a migration file into individual SQL statements.
+
+    Tests :func:`sqlite3.complete_statement` at every ``;`` (string/comment
+    safe), so multiple statements sharing a line split correctly — unlike a
+    line-based split, and unlike ``executescript``, which issues an implicit
+    COMMIT first and leaves partial DDL behind when a later statement fails.
+
+    Migration files must NOT contain their own transaction control
+    (BEGIN/COMMIT/ROLLBACK) — the runner owns the transaction (one per file,
+    all-or-nothing). Violations raise ValueError instead of failing cryptically
+    mid-apply.
+    """
+    stmts: list[str] = []
+    buf = ""
+    pieces = sql.split(";")
+    for i, piece in enumerate(pieces):
+        last = i == len(pieces) - 1
+        buf += piece if last else piece + ";"
+        if sqlite3.complete_statement(buf):
+            chunk = buf.strip()
+            buf = ""
+            if not chunk or _only_comments(chunk):
+                continue
+            first_word = chunk.split(None, 1)[0].rstrip(";").upper()
+            if first_word in _TXN_CONTROL:
+                raise ValueError(
+                    "migration files must not contain their own transaction control "
+                    f"({first_word}); the migration runner owns the transaction"
+                )
+            stmts.append(chunk)
+    tail = buf.strip()
+    if tail and not _only_comments(tail):
+        stmts.append(tail)  # trailing statement missing its semicolon
+    return stmts
+
+
 def migrate(conn: sqlite3.Connection, directory: Path | None = None) -> list[Migration]:
     """Apply all pending migrations in order. Returns the ones applied.
 
-    Applied file-by-file: each migration's SQL runs, then its version is
-    recorded and committed, before the next begins. A migration that raises
-    leaves every *earlier* migration committed and this one's version
-    unrecorded, so a fixed re-run resumes cleanly. Safe to call repeatedly —
+    Each migration file is **atomic**: all its statements plus the
+    schema_version record commit together, or roll back together. A migration
+    that raises leaves every *earlier* migration committed and this one fully
+    unapplied, so a fixed re-run resumes cleanly. Safe to call repeatedly —
     already-applied migrations are skipped.
     """
     applied: list[Migration] = []
     for mig in pending_migrations(conn, directory):
+        conn.commit()  # flush any caller transaction before our explicit one
         try:
-            conn.executescript(mig.sql)
+            conn.execute("BEGIN")
+            for stmt in _split_statements(mig.sql):
+                conn.execute(stmt)
             conn.execute(
                 "INSERT INTO schema_version(version, name, applied_at) VALUES (?, ?, ?)",
                 (mig.version, mig.name, _utcnow_iso()),

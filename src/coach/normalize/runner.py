@@ -37,6 +37,27 @@ def _cycle_offsets(conn: sqlite3.Connection) -> dict[int, str]:
     return out
 
 
+def _sleep_resp_rates(conn: sqlite3.Connection) -> dict[str, float]:
+    """sleep_id -> respiratory_rate, from raw WHOOP sleep events.
+
+    WHOOP reports respiratory rate on the sleep record; recovery links to it via
+    ``sleep_id``. Unscored sleeps (no score) are simply absent (§2.7).
+    """
+    out: dict[str, float] = {}
+    # sibling raw versions of the same sleep (edited payloads) can coexist;
+    # order by ingest time so the NEWEST ingested version wins deterministically
+    for r in conn.execute(
+        "SELECT payload FROM raw_events WHERE source='whoop_api' AND record_type='sleep' "
+        "ORDER BY ingested_at, id"
+    ):
+        p = json.loads(r["payload"])
+        sid = p.get("id")
+        rate = (p.get("score") or {}).get("respiratory_rate")
+        if sid is not None and rate is not None:
+            out[str(sid)] = float(rate)
+    return out
+
+
 def normalize_all(
     conn: sqlite3.Connection,
     *,
@@ -51,6 +72,7 @@ def normalize_all(
         conn.execute("DELETE FROM weight_measurement")
 
     offsets = _cycle_offsets(conn)
+    resp_rates = _sleep_resp_rates(conn)
 
     n_rec = 0
     for r in conn.execute(
@@ -58,7 +80,9 @@ def normalize_all(
     ).fetchall():
         payload = json.loads(r["payload"])
         offset = offsets.get(payload.get("cycle_id"))
-        row = parse_recovery(payload, tz_offset=offset, user_id=user_id)
+        sleep_id = payload.get("sleep_id")
+        rate = resp_rates.get(str(sleep_id)) if sleep_id is not None else None
+        row = parse_recovery(payload, tz_offset=offset, resp_rate=rate, user_id=user_id)
         if row is None:
             continue
         upsert_recovery(conn, row, raw_ref=r["id"], derived_at=derived_at)
@@ -73,7 +97,7 @@ def normalize_all(
         upsert_workout(conn, wrow, raw_ref=r["id"], derived_at=derived_at)
         n_wk += 1
 
-    n_wt = _normalize_healthkit_weight(conn, user_id, derived_at)
+    n_wt, n_wt_skipped = _normalize_healthkit_weight(conn, user_id, derived_at)
 
     n_groups = _regroup_workouts(conn, tolerance_s)
     conn.commit()
@@ -81,25 +105,29 @@ def normalize_all(
         "recovery": n_rec,
         "workout": n_wk,
         "weight": n_wt,
+        "weight_skipped": n_wt_skipped,
         "workout_groups": n_groups,
     }
 
 
 def _normalize_healthkit_weight(
     conn: sqlite3.Connection, user_id: int, derived_at: str
-) -> int:
+) -> tuple[int, int]:
     """Derive weight_measurement rows from raw HealthKit body records.
 
-    One canonical row per raw body ``<Record>`` (1:1 raw_ref, §2.1). BMI and
-    missing-value records parse to None and are skipped (§2.7).
+    One canonical row per raw body ``<Record>`` (1:1 raw_ref, §2.1). BMI,
+    missing-value, and unknown-unit records parse to None and are skipped
+    (§2.7) — the skip COUNT is returned and surfaced so canonical can never
+    silently shrink on a rebuild without it showing in the totals.
     """
-    n = 0
+    n = skipped = 0
     for r in conn.execute(
         "SELECT id, external_id, payload FROM raw_events WHERE source='healthkit'"
     ).fetchall():
         payload = json.loads(r["payload"])
         partial = parse_body_record(payload, user_id=user_id)
         if partial is None:
+            skipped += 1
             continue
         upsert_weight(
             conn,
@@ -110,7 +138,7 @@ def _normalize_healthkit_weight(
             derived_at=derived_at,
         )
         n += 1
-    return n
+    return n, skipped
 
 
 def _regroup_workouts(conn: sqlite3.Connection, tolerance_s: int) -> int:

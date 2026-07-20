@@ -10,8 +10,10 @@ HealthKit is our weight/body source; food comes from the MFP CSV adapter
 (Phase 6). See docs/healthkit-export-notes.md for the observed format.
 
 Design notes:
-  * Weight/lean mass arrive in **pounds** (`lb`) and are converted to kg.
-    BodyFat is a **percent** (0-100) and is stored as-is.
+  * Mass conversion is **unit-aware** (lb/kg/g/oz/st -> kg, per-record `unit`
+    attribute; the observed export is lb throughout but HealthKit permits any).
+    Unknown units skip the record (§2.7: absence over garbage). BodyFat is
+    normalized to percent (0-100); 0-1 fractions are rescaled.
   * Each HealthKit ``<Record>`` carries exactly ONE metric, so one record maps
     to a *partial* row (one of weight/bf/lean set). The impure runner merges
     partials sharing an identity (source_app + instant) into one
@@ -29,6 +31,19 @@ from datetime import datetime
 from ..timeutil import day_key, normalize_offset, to_utc_iso
 
 LB_TO_KG = 0.45359237
+
+# mass-unit -> kg conversion factors. The observed export uses lb throughout,
+# but HealthKit permits per-record units (a manual Health entry can be kg, a
+# stray record g/oz). Assuming lb unconditionally would DOUBLE-convert a kg
+# record into garbage — unit handling is load-bearing (recon notes).
+_MASS_TO_KG = {
+    "lb": LB_TO_KG,
+    "lbs": LB_TO_KG,
+    "kg": 1.0,
+    "g": 0.001,
+    "oz": 0.028349523125,
+    "st": 6.35029318,
+}
 
 _BODY_MASS = "HKQuantityTypeIdentifierBodyMass"
 _BODY_FAT = "HKQuantityTypeIdentifierBodyFatPercentage"
@@ -102,25 +117,56 @@ def parse_hk_datetime(raw: str | None) -> tuple[str | None, str | None]:
     return to_utc_iso(dt), offset
 
 
+def _mass_kg(value: float, unit: str | None) -> float | None:
+    """Convert a mass reading to kg, honoring the record's own unit.
+
+    Unknown/missing unit returns None — skipping the record beats storing a
+    silently mis-converted number (§2.7: absence over garbage).
+    """
+    factor = _MASS_TO_KG.get((unit or "").strip().lower())
+    if factor is None:
+        return None
+    return round(value * factor, 4)
+
+
+def _fat_pct(value: float) -> float:
+    """Normalize body fat to percent (0-100).
+
+    The observed export stores 0-100 with unit '%', but HealthKit's canonical
+    representation of a percentage is a 0-1 fraction — some writers export it
+    that way. A true body fat <=1% is not physiologically plausible, so values
+    <=1.0 are treated as fractions and scaled.
+    """
+    if 0 < value <= 1.0:
+        return round(value * 100, 4)
+    return round(value, 4)
+
+
 def parse_body_record(payload: dict, *, user_id: int = 1) -> WeightPartial | None:
     """HealthKit body record -> ``WeightPartial``. None if not canonicalizable.
 
-    Handles BodyMass (lb->kg), BodyFatPercentage (% as-is), LeanBodyMass
-    (lb->kg). BMI is intentionally skipped (derivable; no column). A missing
-    numeric value (§2.7) yields None rather than a fabricated 0.
+    Handles BodyMass / LeanBodyMass (unit-aware -> kg) and BodyFatPercentage
+    (normalized to 0-100 %). BMI is intentionally skipped (derivable; no
+    column). A missing value or an unrecognized mass unit (§2.7) yields None
+    rather than a fabricated or mis-converted number.
     """
     rtype = payload.get("type")
     value = payload.get("value")
     if value is None:
         return None
 
+    unit = payload.get("unit")
     weight_kg = body_fat_pct = lean_mass_kg = None
     if rtype == _BODY_MASS:
-        weight_kg = round(float(value) * LB_TO_KG, 4)
+        weight_kg = _mass_kg(float(value), unit)
+        if weight_kg is None:
+            return None
     elif rtype == _BODY_FAT:
-        body_fat_pct = round(float(value), 4)
+        body_fat_pct = _fat_pct(float(value))
     elif rtype == _LEAN_MASS:
-        lean_mass_kg = round(float(value) * LB_TO_KG, 4)
+        lean_mass_kg = _mass_kg(float(value), unit)
+        if lean_mass_kg is None:
+            return None
     else:
         return None  # BMI / anything else: not stored
 
