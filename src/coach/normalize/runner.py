@@ -37,6 +37,24 @@ def _cycle_offsets(conn: sqlite3.Connection) -> dict[int, str]:
     return out
 
 
+def _sleep_resp_rates(conn: sqlite3.Connection) -> dict[str, float]:
+    """sleep_id -> respiratory_rate, from raw WHOOP sleep events.
+
+    WHOOP reports respiratory rate on the sleep record; recovery links to it via
+    ``sleep_id``. Unscored sleeps (no score) are simply absent (§2.7).
+    """
+    out: dict[str, float] = {}
+    for r in conn.execute(
+        "SELECT payload FROM raw_events WHERE source='whoop_api' AND record_type='sleep'"
+    ):
+        p = json.loads(r["payload"])
+        sid = p.get("id")
+        rate = (p.get("score") or {}).get("respiratory_rate")
+        if sid is not None and rate is not None:
+            out[str(sid)] = float(rate)
+    return out
+
+
 def normalize_all(
     conn: sqlite3.Connection,
     *,
@@ -51,6 +69,7 @@ def normalize_all(
         conn.execute("DELETE FROM weight_measurement")
 
     offsets = _cycle_offsets(conn)
+    resp_rates = _sleep_resp_rates(conn)
 
     n_rec = 0
     for r in conn.execute(
@@ -58,7 +77,9 @@ def normalize_all(
     ).fetchall():
         payload = json.loads(r["payload"])
         offset = offsets.get(payload.get("cycle_id"))
-        row = parse_recovery(payload, tz_offset=offset, user_id=user_id)
+        sleep_id = payload.get("sleep_id")
+        rate = resp_rates.get(str(sleep_id)) if sleep_id is not None else None
+        row = parse_recovery(payload, tz_offset=offset, resp_rate=rate, user_id=user_id)
         if row is None:
             continue
         upsert_recovery(conn, row, raw_ref=r["id"], derived_at=derived_at)

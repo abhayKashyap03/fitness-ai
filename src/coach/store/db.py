@@ -94,19 +94,45 @@ def pending_migrations(conn: sqlite3.Connection, directory: Path | None = None) 
     return [m for m in discover_migrations(directory) if m.version not in done]
 
 
+def _split_statements(sql: str) -> list[str]:
+    """Split a migration file into individual SQL statements.
+
+    Uses :func:`sqlite3.complete_statement` (semicolon-aware, string/comment
+    safe) so statements can run one-by-one inside a single explicit
+    transaction — unlike ``executescript``, which issues an implicit COMMIT
+    first and leaves partial DDL behind when a later statement fails.
+    """
+    stmts: list[str] = []
+    buf = ""
+    for line in sql.splitlines(keepends=True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            stmts.append(buf.strip())
+            buf = ""
+    tail = buf.strip()
+    if tail and any(
+        ln.strip() and not ln.strip().startswith("--") for ln in tail.splitlines()
+    ):
+        stmts.append(tail)  # trailing statement missing its semicolon
+    return stmts
+
+
 def migrate(conn: sqlite3.Connection, directory: Path | None = None) -> list[Migration]:
     """Apply all pending migrations in order. Returns the ones applied.
 
-    Applied file-by-file: each migration's SQL runs, then its version is
-    recorded and committed, before the next begins. A migration that raises
-    leaves every *earlier* migration committed and this one's version
-    unrecorded, so a fixed re-run resumes cleanly. Safe to call repeatedly —
+    Each migration file is **atomic**: all its statements plus the
+    schema_version record commit together, or roll back together. A migration
+    that raises leaves every *earlier* migration committed and this one fully
+    unapplied, so a fixed re-run resumes cleanly. Safe to call repeatedly —
     already-applied migrations are skipped.
     """
     applied: list[Migration] = []
     for mig in pending_migrations(conn, directory):
+        conn.commit()  # flush any caller transaction before our explicit one
         try:
-            conn.executescript(mig.sql)
+            conn.execute("BEGIN")
+            for stmt in _split_statements(mig.sql):
+                conn.execute(stmt)
             conn.execute(
                 "INSERT INTO schema_version(version, name, applied_at) VALUES (?, ?, ?)",
                 (mig.version, mig.name, _utcnow_iso()),

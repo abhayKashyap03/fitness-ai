@@ -65,6 +65,7 @@ def parse_recovery(
     payload: dict,
     *,
     tz_offset: str | None = None,
+    resp_rate: float | None = None,
     user_id: int = 1,
 ) -> RecoveryRow | None:
     """WHOOP recovery record -> RecoveryRow. Returns None if unscored.
@@ -73,6 +74,11 @@ def parse_recovery(
     carries no offset — see ADR-0006). When absent, the day is computed in UTC
     and ``utc_offset`` is NULL. ``tz_name`` is always NULL for WHOOP (offset-only
     source); it stays reserved for IANA-capable sources like HealthKit.
+
+    ``resp_rate`` comes from the associated sleep record (WHOOP reports
+    respiratory rate there, not on recovery) — joined by ``sleep_id`` in the
+    runner. Still pure: same raw inputs, same row. It widens the objective
+    calibration currency (§5) ahead of the BLE adapter.
     """
     if payload.get("score_state") != "SCORED":
         return None
@@ -92,7 +98,7 @@ def parse_recovery(
         resting_hr_bpm=score.get("resting_heart_rate"),
         spo2_pct=score.get("spo2_percentage"),
         skin_temp_c=score.get("skin_temp_celsius"),
-        resp_rate_bpm=None,  # WHOOP reports respiratory rate on the sleep record
+        resp_rate_bpm=resp_rate,  # from the linked sleep record (see docstring)
         score=score.get("recovery_score"),
         score_scale="whoop_0_100",
         score_method="whoop_proprietary",

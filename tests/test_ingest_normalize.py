@@ -30,7 +30,8 @@ class FakeClient:
         return _load("cycle_page1.json")["records"]
 
     def get_sleep(self, start=None, end=None):
-        return []
+        # synthetic sleeps whose ids match the real recoveries' sleep_id
+        return _load("sleep_page1.synthetic.json")["records"]
 
     def get_workouts(self, start=None, end=None):
         return _load("workout_page1.json")["records"]
@@ -81,6 +82,18 @@ def test_normalize_populates_canonical(migrated_conn):
     assert row["day_key"] == "2026-06-01"
     assert row["utc_offset"] == "-10:00"
     assert row["tz_name"] is None
+
+
+def test_resp_rate_joined_from_sleep(migrated_conn):
+    """Respiratory rate lives on the sleep record; joined into recovery by sleep_id."""
+    _seed(migrated_conn)
+    normalize_all(migrated_conn)
+    rows = {
+        r["score"]: r["resp_rate_bpm"]
+        for r in migrated_conn.execute("SELECT score, resp_rate_bpm FROM recovery")
+    }
+    assert rows[37.0] == 16.25
+    assert rows[52.0] == 15.8
 
 
 def test_normalize_idempotent_and_rebuild_identical(migrated_conn):
