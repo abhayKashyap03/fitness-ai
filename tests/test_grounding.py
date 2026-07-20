@@ -69,9 +69,14 @@ def test_tool_substrate_is_honestly_absent(migrated_conn, scenario):
     assert _HONEST_ABSENCE[scenario.name](out), f"{scenario.name}: tool masked the absence"
 
 
-# ---- live eval is gated, never auto-run ------------------------------------
+# ---- live runner surfaces API failures (offline; injected transport) -------
 
 
-def test_live_runner_is_gated():
-    with pytest.raises(NotImplementedError):
-        run_live_grounding("fake-key")
+def test_live_runner_propagates_api_errors():
+    from coach.coach.llm import ApiError
+
+    def failing_transport(url, headers, body):
+        return 401, {"error": {"type": "authentication_error", "message": "bad key"}}, {}
+
+    with pytest.raises(ApiError):
+        run_live_grounding("fake-key", model="m", transport=failing_transport)
