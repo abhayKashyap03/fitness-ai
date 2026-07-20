@@ -13,8 +13,11 @@
 - Schema at **v5** (…0004 utc_offset, **0005 source_app** — D3/ADR-0008: adds
   `source_app` + `utc_offset` to weight/food, recreates resolver views; raw
   untouched).
-- **PR #5 MERGED** (T5.0–T5.2). Branch **`phase5/healthkit-weight`** carries
-  T5.3–T5.8 + D3 → open a PR (see below).
+- **PR #5 + #6 MERGED** — Phase 5 WEIGHT is on `main` (T5.0–T5.8 + D3).
+- **Phase 4 pre-work** on branch **`phase4/coach-layer`** (stacked on merged #6):
+  T4.1 tool contract, §8.6 guardrails, T4.2 grounding harness (authored;
+  live-model eval gated on Anthropic SDK + API key). Deterministic, no tokens.
+  → open a PR.
 - CLI: `coach db init|status`, `auth whoop`, `ingest whoop`,
   **`ingest healthkit --file`**, `normalize [--rebuild]`, `status --date`, `tdee`.
 - **GateGuard disabled** via `.claude/settings.local.json` (`ECC_GATEGUARD=off`),
@@ -22,6 +25,20 @@
   CLAUDE.md §8.2** — see Open items.
 
 ---
+
+## Session 2026-07-19 (e) — Phase 4 pre-work while MFP CSV pending
+
+Branch `phase4/coach-layer` (stacked on merged #6). Food-independent Phase-4 work.
+
+- **T4.1** `coach/tools.py` — 5 model-callable tools over Phase-3 compute;
+  structured data + provenance + explicit null/insufficient; no prose/math (§2.2).
+- **§8.6** `compute/guardrails.py` — code-enforced hard limits (weight-loss-rate
+  alert off EWMA trend; 1200 kcal floor). Surfaced as `get_safety_flags`.
+- **T4.2** `coach/grounding.py` — faithfulness SYSTEM_PROMPT + fabrication-risk
+  scenarios + absence/fabrication helpers. Substrate honesty tested deterministically;
+  **live-model eval gated** (Anthropic SDK §6.4 + tokens §8.7 — `run_live_grounding`
+  raises, never in pytest).
+- 145 tests green; ruff + mypy clean. GateGuard stays off (user-authorized).
 
 ## Session 2026-07-19 (d) — Phase 5 WEIGHT built (D3 + T5.3–T5.8)
 

@@ -177,19 +177,26 @@ Watch, and gym equipment disagree. If it isn't obvious, this is a legitimate
 to fill time. If Phase 3 finishes and no human is available, prefer strengthening
 tests and docs over half-building this.
 
-### T4.1 — Tool-calling contract
-Define the tools the LLM may call (`get_daily_status`, `get_weight_trend`,
-`get_recovery_history`, `get_tdee_estimate`, ...). Every tool returns
-**structured data with explicit provenance and explicit nulls**. No tool returns
-prose. No tool does math the compute layer doesn't already do.
+### [x] T4.1 — Tool-calling contract
+`src/coach/coach/tools.py` — 5 tools (`get_daily_status`, `get_weight_trend`,
+`get_recovery_history`, `get_tdee_estimate`, `get_safety_flags`), each a thin
+adapter over tested Phase-3 compute + resolver views. Structured data only, with
+provenance (`source`) + explicit null/insufficient; no prose, no math (§2.2).
+`anthropic_tool_defs()` + `dispatch()`. Deterministic, no model call.
 
-**Done when:** tool schemas defined + documented; each maps to a tested compute
-function.
+### [x] §8.6 — Deterministic safety guardrails
+`src/coach/compute/guardrails.py` — hard limits in code, not prompt:
+weight-loss-rate alert off the EWMA trend (warn >1%/wk, critical >1.5%/wk),
+1200 kcal floor clamp. Surfaced via the `get_safety_flags` tool.
 
-### T4.2 — Grounding harness
-A test suite of coaching queries verifying the model never fabricates a number
-and correctly says "I don't have that data" when it's absent. Target: **zero
-fabrications**.
+### [~] T4.2 — Grounding harness (authored; live eval gated)
+`src/coach/coach/grounding.py` — `SYSTEM_PROMPT` faithfulness contract +
+fabrication-risk `SCENARIOS` + `admits_absence`/`fabricated_numbers` helpers.
+**Substrate guarantee tested** (no tokens, §6.2): every absence scenario's tool
+output is honestly null/insufficient. **Live-model eval remains** — needs the
+Anthropic SDK (§6.4 sign-off) + token spend (§8.7); `run_live_grounding` is a
+gated manual runner (raises; never in pytest). Zero-fabrication target verified
+against the live model when you wire that up.
 
 ---
 
