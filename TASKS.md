@@ -198,13 +198,17 @@ transport — harness itself offline-tested). **Human step remaining:** put
 `ANTHROPIC_API_KEY` in `.env`, run `coach eval grounding` (burns tokens §8.7);
 target = zero fabrications.
 
-### [x] T4.3 — `coach ask` (the actual coach)
-`coach/llm.py` (stdlib-only urllib Messages client — no SDK, §6.4; injectable
-transport, bounded retries, prompt caching §8.7, no secrets logged §8.4) +
-`coach/agent.py` (bounded loop MAX_ROUNDS=8; refusal/pause_turn/max_tokens/
-unknown-tool handled explicitly). CLI: `coach ask "…" [--show-tools]`,
-`coach eval grounding`. `COACH_MODEL` default claude-opus-4-8 (overridable).
-**Live verification pending** (needs ANTHROPIC_API_KEY).
+### [x] T4.3 — `coach ask` (the actual coach), provider-agnostic
+`coach/llm/` package — canonical conversation shape (`base.py`) + one module
+per vendor (`google.py` default/free-tier, `anthropic.py`), stdlib only, no
+SDKs (§6.4); injectable transport, bounded retries, caching where the provider
+supports it (§8.7), keys never logged or URL-borne (§8.4). `coach/agent.py`
+is the bounded loop (MAX_ROUNDS=8) over the canonical shape — it never sees a
+vendor field (§2.5). CLI: `coach ask "…" [--show-tools]`, `coach eval
+grounding`; `coach doctor` reports provider/model.
+Config: `COACH_LLM_PROVIDER` (google|anthropic), `GOOGLE_API_KEY` /
+`ANTHROPIC_API_KEY`, `COACH_MODEL` (empty ⇒ provider default).
+**Live verification pending** (needs a provider key — Google free tier).
 
 ---
 
