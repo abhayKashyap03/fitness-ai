@@ -15,7 +15,7 @@ The **substrate guarantee** (tested deterministically, no tokens): for every
 absence scenario the tool layer returns an explicit null / insufficient /
 not-logged marker — so a faithful model has nothing to hallucinate from. The
 remaining question (does the live model actually stay faithful?) is the live
-eval, which needs the Anthropic API and is run manually via the gated runner
+eval, which needs a real provider API key and is run manually via the runner
 below — never inside pytest (§6.2: tests make no live calls).
 """
 
@@ -155,23 +155,20 @@ SCENARIOS: list[GroundingScenario] = [
 # ---- live eval runner (manual; NOT a test) ---------------------------------
 
 
-def run_live_grounding(
-    api_key: str, *, model: str = "claude-opus-4-8", transport=None
-) -> list[dict]:
-    """Run SCENARIOS against the model and score faithfulness per scenario.
+def run_live_grounding(provider) -> list[dict]:
+    """Run SCENARIOS against a provider and score faithfulness per scenario.
 
-    Burns tokens when run against the live API (§8.7) — invoked manually via
-    ``coach eval grounding``, never from pytest (§6.2). ``transport`` is
-    injectable so the harness itself is testable offline. Each scenario gets a
-    fresh in-memory migrated DB seeded with its fixture state; the agent runs
-    under SYSTEM_PROMPT with the real tool contract; the answer is scored with
-    :func:`admits_absence` and :func:`fabricated_numbers`.
+    Burns tokens when run against a live API (§8.7) — invoked manually via
+    ``coach eval grounding``, never from pytest (§6.2). Any provider works
+    (:mod:`coach.coach.llm`); a fake-transport provider makes the harness
+    itself testable offline. Each scenario gets a fresh in-memory migrated DB
+    seeded with its fixture state; the agent runs under SYSTEM_PROMPT with the
+    real tool contract; the answer is scored with :func:`admits_absence` and
+    :func:`fabricated_numbers`.
     """
     from ..store import db as _db
     from .agent import ask
-    from .llm import AnthropicClient
 
-    client = AnthropicClient(api_key, transport=transport)
     results: list[dict] = []
     for sc in SCENARIOS:
         conn = sqlite3.connect(":memory:")
@@ -179,7 +176,7 @@ def run_live_grounding(
         try:
             _db.migrate(conn)
             sc.seed(conn)
-            res = ask(conn, client, sc.query, model=model)
+            res = ask(conn, provider, sc.query)
         finally:
             conn.close()
         fabrications = fabricated_numbers(res.text, sc.allowed_numbers)

@@ -73,10 +73,11 @@ def test_tool_substrate_is_honestly_absent(migrated_conn, scenario):
 
 
 def test_live_runner_propagates_api_errors():
-    from coach.coach.llm import ApiError
+    from coach.coach.llm import ApiError, build_provider
 
     def failing_transport(url, headers, body):
         return 401, {"error": {"type": "authentication_error", "message": "bad key"}}, {}
 
+    provider = build_provider("google", "fake-key", transport=failing_transport)
     with pytest.raises(ApiError):
-        run_live_grounding("fake-key", model="m", transport=failing_transport)
+        run_live_grounding(provider)

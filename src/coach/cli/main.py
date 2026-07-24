@@ -343,22 +343,29 @@ def _cmd_tdee(settings: Settings, args: argparse.Namespace) -> int:
 # ---- ask / eval ------------------------------------------------------------
 
 
+def _build_provider(settings: Settings):
+    """Construct the configured LLM provider (raises ConfigError if unusable)."""
+    from ..coach.llm import build_provider
+
+    settings.require_llm()
+    return build_provider(
+        settings.llm_provider, settings.llm_api_key, model=settings.coach_model
+    )
+
+
 def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
     from ..coach.agent import ask
-    from ..coach.llm import AnthropicClient, ApiError
+    from ..coach.llm import ApiError
 
     try:
-        settings.require_anthropic()
+        provider = _build_provider(settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
     conn = db.connect(settings.db_path)
     try:
         _ensure_migrated(conn)
-        client = AnthropicClient(settings.anthropic_api_key)
-        result = ask(
-            conn, client, args.question, model=settings.coach_model, user_id=settings.user_id
-        )
+        result = ask(conn, provider, args.question, user_id=settings.user_id)
     except ApiError as exc:
         print(f"API error: {exc}", file=sys.stderr)
         return 1
@@ -372,9 +379,8 @@ def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
     print(result.text)
     u = result.usage
     print(
-        f"\n[{settings.coach_model} · {result.rounds} round(s) · "
-        f"in={u.input_tokens} out={u.output_tokens} "
-        f"cache_read={u.cache_read_input_tokens}]",
+        f"\n[{provider.name}/{provider.model} · {result.rounds} round(s) · "
+        f"in={u.input_tokens} out={u.output_tokens} cached={u.cached_input_tokens}]",
         file=sys.stderr,
     )
     return 0
@@ -385,11 +391,11 @@ def _cmd_eval_grounding(settings: Settings, _args: argparse.Namespace) -> int:
     from ..coach.grounding import run_live_grounding
 
     try:
-        settings.require_anthropic()
+        provider = _build_provider(settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
-    results = run_live_grounding(settings.anthropic_api_key, model=settings.coach_model)
+    results = run_live_grounding(provider)
     failed = 0
     for r in results:
         status = "PASS" if r["passed"] else "FAIL"
@@ -464,6 +470,14 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
 
     export = Path("apple_health_export/export.xml")
     print(f"  hk export:      {'present' if export.exists() else 'not found (optional)'}")
+
+    # LLM provider (never print the key itself, §8.4)
+    try:
+        provider = _build_provider(settings)
+        print(f"  coach llm:      {provider.name}/{provider.model} (key configured)")
+    except ConfigError as exc:
+        problems += 1
+        print(f"  coach llm:      NOT CONFIGURED — {exc}")
 
     print("OK" if problems == 0 else f"{problems} problem(s) found")
     return 0 if problems == 0 else 1

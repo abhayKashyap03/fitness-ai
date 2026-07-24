@@ -1,15 +1,19 @@
 """The coach agent loop (Phase 4): question -> tool calls -> grounded answer.
 
-Wires the deterministic tool contract (:mod:`coach.coach.tools`) to the model
-under the faithfulness SYSTEM_PROMPT (:mod:`coach.coach.grounding`). The model
-decides which tools to call; every number comes from the tools; the loop is
-**bounded** (§8.7: never loop model calls without a bound).
+Wires the deterministic tool contract (:mod:`coach.coach.tools`) to whichever
+LLM provider is configured (:mod:`coach.coach.llm`) under the faithfulness
+SYSTEM_PROMPT (:mod:`coach.coach.grounding`). The loop speaks only the
+canonical shape — it never sees a vendor field name (§2.5), so switching
+providers changes a config value, not this file.
+
+The model decides which tools to call; every number comes from the tools; the
+loop is **bounded** (§8.7: never loop model calls without a bound).
 
 Failure handling:
-  * unknown/failed tool -> ``tool_result`` with ``is_error`` (model recovers)
-  * ``refusal`` stop -> explicit marker, no fabricated answer
-  * ``pause_turn`` -> re-send, counted against the same round bound
-  * round bound hit -> partial text + explicit note, never silent truncation
+  * unknown/failed tool -> error result fed back (the model can recover)
+  * ``refusal`` stop -> explicit marker, never a fabricated answer
+  * ``pause`` -> re-send, counted against the same round bound
+  * round bound hit -> explicit note, never silent truncation
 """
 
 from __future__ import annotations
@@ -18,8 +22,17 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from .grounding import SYSTEM_PROMPT
-from .llm import AnthropicClient, Usage
-from .tools import anthropic_tool_defs, dispatch
+from .llm import (
+    AssistantTurn,
+    LLMProvider,
+    ToolResult,
+    ToolResultTurn,
+    ToolUse,
+    Turn,
+    Usage,
+    UserTurn,
+)
+from .tools import dispatch, tool_specs
 
 MAX_ROUNDS = 8  # hard bound on model calls per question (§8.7)
 
@@ -41,60 +54,45 @@ class AgentResult:
 
 
 def _run_tools(
-    conn: sqlite3.Connection, blocks: list[dict], *, user_id: int, calls: list[ToolCall]
-) -> list[dict]:
-    """Execute every tool_use block; return tool_result blocks (single message).
+    conn: sqlite3.Connection,
+    uses: list[ToolUse],
+    *,
+    user_id: int,
+    calls: list[ToolCall],
+) -> list[ToolResult]:
+    """Execute every requested tool; return canonical results.
 
-    A failing tool becomes ``is_error`` instead of crashing the loop — the
-    model sees the error text and can recover or say it lacks the data.
+    A failing tool becomes an error result instead of crashing the loop — the
+    model sees what went wrong and can recover or say it lacks the data.
     """
-    import json
-
-    results: list[dict] = []
-    for b in blocks:
-        name, args = b.get("name", ""), b.get("input") or {}
+    results: list[ToolResult] = []
+    for use in uses:
         try:
-            out = dispatch(conn, name, args, user_id=user_id)
-            results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": b["id"],
-                    "content": json.dumps(out),
-                }
-            )
-            calls.append(ToolCall(name, args, True))
+            payload = dispatch(conn, use.name, use.args, user_id=user_id)
+            results.append(ToolResult(use.id, use.name, payload))
+            calls.append(ToolCall(use.name, use.args, True))
         except Exception as exc:
-            results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": b["id"],
-                    "content": f"tool error: {exc}",
-                    "is_error": True,
-                }
-            )
-            calls.append(ToolCall(name, args, False))
+            results.append(ToolResult(use.id, use.name, f"tool error: {exc}", is_error=True))
+            calls.append(ToolCall(use.name, use.args, False))
     return results
 
 
 def ask(
     conn: sqlite3.Connection,
-    client: AnthropicClient,
+    provider: LLMProvider,
     question: str,
     *,
-    model: str,
     user_id: int = 1,
     max_rounds: int = MAX_ROUNDS,
 ) -> AgentResult:
     """Answer one coaching question, grounded in tool results."""
-    messages: list[dict] = [{"role": "user", "content": question}]
-    tools = anthropic_tool_defs()
+    turns: list[Turn] = [UserTurn(question)]
+    tools = tool_specs()
     calls: list[ToolCall] = []
     usage = Usage()
 
     for round_n in range(1, max_rounds + 1):
-        resp = client.create_message(
-            model=model, system=SYSTEM_PROMPT, messages=messages, tools=tools
-        )
+        resp = provider.complete(system=SYSTEM_PROMPT, turns=turns, tools=tools)
         usage = usage + resp.usage
 
         if resp.stop_reason == "refusal":
@@ -102,25 +100,22 @@ def ask(
                 "The model declined to answer this request.", calls, round_n, usage
             )
 
-        if resp.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": resp.content})
-            continue  # server resumes; still counted against the bound
+        if resp.stop_reason == "pause":
+            turns.append(AssistantTurn(resp.native))
+            continue  # provider resumes; still counted against the bound
 
         if resp.stop_reason == "tool_use":
-            tool_blocks = [b for b in resp.content if b.get("type") == "tool_use"]
-            messages.append({"role": "assistant", "content": resp.content})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": _run_tools(conn, tool_blocks, user_id=user_id, calls=calls),
-                }
+            turns.append(AssistantTurn(resp.native))
+            turns.append(
+                ToolResultTurn(
+                    _run_tools(conn, resp.tool_uses, user_id=user_id, calls=calls)
+                )
             )
             continue
 
-        # end_turn / max_tokens / stop_sequence: extract final text
-        text = "".join(b.get("text", "") for b in resp.content if b.get("type") == "text")
+        text = resp.text
         if resp.stop_reason == "max_tokens":
-            text += "\n[response truncated at max_tokens]"
+            text += "\n[response truncated at the model's output limit]"
         return AgentResult(text, calls, round_n, usage)
 
     return AgentResult(
