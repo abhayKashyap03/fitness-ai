@@ -462,6 +462,48 @@ def _cmd_eval_grounding(settings: Settings, _args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
+def _fmt_corr(c: object) -> str:
+    from ..compute.hrv_validation import Correlation
+    from ..compute.trends import Insufficient
+
+    if isinstance(c, Correlation):
+        return f"r={c.r:+.3f} (n={c.n})"
+    if isinstance(c, Insufficient):
+        return f"insufficient data (have {c.have}, need {c.needed})"
+    return str(c)
+
+
+def _cmd_eval_hrv(settings: Settings, args: argparse.Namespace) -> int:
+    """HRV-differentiator validation report (risk #6). Deterministic, no tokens."""
+    from ..compute.hrv_validation import hrv_validation_report
+    from ..compute.trends import Insufficient
+
+    end = args.end or _today(settings)
+    conn = db.connect(settings.db_path)
+    try:
+        rep = hrv_validation_report(conn, user_id=settings.user_id, end=end, window=args.window)
+    finally:
+        conn.close()
+
+    cv = (
+        f"{rep.hrv_cv:.1%}"
+        if not isinstance(rep.hrv_cv, Insufficient)
+        else f"insufficient data (have {rep.hrv_cv.have}, need {rep.hrv_cv.needed})"
+    )
+    print(f"HRV validation over the last {rep.window_days} days (ending {end})")
+    print(f"  hrv days observed:        {rep.hrv_days}")
+    print(f"  day-to-day noise (CV):    {cv}")
+    print(f"  lag-1 autocorrelation:    {_fmt_corr(rep.hrv_lag1_autocorr)}")
+    print(f"  dev% -> next-day score:   {_fmt_corr(rep.dev_vs_next_score)}")
+    print(f"  dev% -> next-day strain:  {_fmt_corr(rep.dev_vs_next_strain)}")
+    print(
+        "\n  reading: high autocorrelation + nonzero deviation correlations are\n"
+        "  NECESSARY (not sufficient) for HRV-informed coaching to beat\n"
+        "  weight+intake alone. Near-zero everywhere -> HRV is noise here (risk #6)."
+    )
+    return 0
+
+
 # ---- doctor / sync ---------------------------------------------------------
 
 
@@ -696,6 +738,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_sub = p_eval.add_subparsers(dest="eval_command", required=True)
     p_eg = eval_sub.add_parser("grounding", help="live zero-fabrication eval (T4.2)")
     p_eg.set_defaults(func=_cmd_eval_grounding)
+    p_eh = eval_sub.add_parser(
+        "hrv", help="HRV-differentiator validation report (deterministic, no tokens)"
+    )
+    p_eh.add_argument("--end", default=None, help="end day_key (default: today in COACH_HOME_TZ)")
+    p_eh.add_argument("--window", type=int, default=90, help="lookback window in days (default 90)")
+    p_eh.set_defaults(func=_cmd_eval_hrv)
 
     p_doctor = sub.add_parser("doctor", help="config/db/token/data sanity report")
     p_doctor.set_defaults(func=_cmd_doctor)
