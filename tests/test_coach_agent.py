@@ -187,6 +187,27 @@ def test_retries_exhausted_raises(script):
         script.build(tr).complete(system="s", turns=[], tools=[])
 
 
+def test_google_honors_json_retry_delay_from_429_body():
+    # Gemini free-tier 429s carry the wait in the JSON body (RetryInfo /
+    # message), never a Retry-After header — the provider must honor it
+    slept: list[float] = []
+    body_429 = {
+        "error": {
+            "code": 429,
+            "message": "You exceeded your current quota. Please retry in 54.1s.",
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "54s"}
+            ],
+        }
+    }
+    tr = FakeTransport([(429, body_429), GoogleScript.text("ok")])
+    provider = GoogleProvider("k", transport=tr, sleep=slept.append)
+    resp = provider.complete(system="s", turns=[], tools=[])
+    assert resp.stop_reason == "end_turn"
+    assert slept == [55.0]  # RetryInfo's 54s + 1s cushion, not exponential 1s
+
+
 def test_error_message_never_contains_the_key():
     tr = FakeTransport([(401, {"error": {"type": "auth", "message": "bad key"}})])
     provider = AnthropicProvider("SUPER-SECRET-KEY", transport=tr, sleep=lambda _s: None)

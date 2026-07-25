@@ -181,12 +181,17 @@ class HttpProviderBase:
                 return data
             if status in self.retryable and attempt < self._max_retries:
                 attempt += 1
-                self._sleep(self._retry_delay(attempt, resp_headers))
+                self._sleep(self._retry_delay(attempt, resp_headers, data))
                 continue
             etype, message = self._error_fields(data)
             raise ApiError(self.name, status, etype, message)
 
-    def _retry_delay(self, attempt: int, headers: dict[str, str]) -> float:
+    def _retry_delay(self, attempt: int, headers: dict[str, str], data: dict) -> float:
+        """Server-suggested wait when available, else exponential backoff.
+
+        ``data`` (the error body) is passed so providers that put the hint in
+        JSON instead of a Retry-After header (Gemini's RetryInfo) can override.
+        """
         retry_after = headers.get("retry-after") or headers.get("Retry-After")
         if retry_after:
             try:
