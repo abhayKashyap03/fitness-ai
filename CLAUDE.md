@@ -369,6 +369,14 @@ subscription** — a Pro/Max plan grants no API access.
   under `source='healthkit'` (OKOK scale vs MFP weight). Keep them sibling rows,
   distinguished by a non-destructive `source_app` column; resolve at read time.
   → [ADR-0008](docs/adr/0008-healthkit-source-app.md).
+- **D4 — MyFitnessPal direct API (overrides §12 for the user's own account).**
+  §12's "do not scrape MFP" is **overridden with sign-off** for this n=1 tool:
+  we ingest the user's own diary directly from MFP's private v2 JSON API (read
+  only; pasted session cookie; no login automation). Risks (ToS, endpoint churn)
+  accepted and isolated to the adapter. The `raw_events.source` CHECK is
+  **dropped entirely** (not extended) so no future source needs a schema change
+  (§2.5). → [ADR-0009](docs/adr/0009-myfitnesspal-direct-api.md),
+  [ADR-0010](docs/adr/0010-override-mfp-scraping-ban.md). Shipped in migration 0006.
 
 ---
 
@@ -420,7 +428,7 @@ Clean seams: yes. Premature machinery: no.
 |---|---|
 | WHOOP Cloud API | ✅ Free OAuth 2.0 (v2). ~100 req/min. Requires active membership. Recovery *formula* is proprietary — we get the score + inputs, not the weighting. Supplies UTC offset, not IANA zone. |
 | WHOOP local BLE | ⚠️ Unofficial, open-source, 5.0 MG unproven |
-| MyFitnessPal | API ❌ **closed; scraping violates ToS — do not.** BUT the user's own **Privacy Center → "Download My Data"** full CSV export (CCPA/GDPR data-portability) is ✅ a sanctioned path and is our **actual nutrition source** — MFP's Reports export is 7-day/Premium-gated, so use the privacy export. Ingest the CSV the user provides; never automate login or scrape. |
+| MyFitnessPal | API officially closed. **OVERRIDE (ADR-0010, signed off):** for THIS n=1 tool we ingest the user's OWN diary directly from MFP's private **v2 JSON API** — read only, authenticated with the user's pasted session cookie, **never** automating login. Fragile (private endpoints churn) but daily. The **Privacy Center → "Download My Data"** CSV export remains a valid, sanctioned occasional backfill. Do NOT generalize this override beyond the user's own account, and do NOT ship a scraper as a product feature. |
 | Apple HealthKit / Google Health Connect | ✅ But **not readable from a laptop** — data lives on-device. Bridge via Health export (XML zip). **Weight/body-comp source only** — MFP paywalled its Apple Health *nutrition* sync (~2024–25), so food does NOT reliably reach the export (n=1: 5 dietary days total, dead after 2026-02). |
 | USDA FoodData Central / Open Food Facts | ✅ Free, open — the intended nutrition DB path |
 | Smart scale | ⚠️ Brand-dependent; Withings has an API, most others route through the health platforms |

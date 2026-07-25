@@ -35,6 +35,7 @@ class Settings:
     whoop_client_id: str = field(default="", repr=False)
     whoop_client_secret: str = field(default="", repr=False)
     whoop_redirect_uri: str = "http://localhost:8080/callback"
+    mfp_session_cookie: str = field(default="", repr=False)
     anthropic_api_key: str = field(default="", repr=False)
     google_api_key: str = field(default="", repr=False)
     llm_provider: str = "google"  # 'google' (free tier) | 'anthropic'
@@ -63,6 +64,15 @@ class Settings:
                 "GOOGLE_API_KEY is missing (COACH_LLM_PROVIDER=google). "
                 "Create a free-tier key at https://aistudio.google.com/apikey "
                 "and add it to .env (see .env.example)."
+            )
+
+    def require_mfp(self) -> None:
+        """Raise a clear error if the MFP session cookie is absent."""
+        if not self.mfp_session_cookie:
+            raise ConfigError(
+                "MFP_SESSION_COOKIE is missing. Log in at myfitnesspal.com, copy "
+                "the Cookie request header from a logged-in tab, and set it in .env "
+                "(see .env.example). It lasts ~weeks; re-copy it when ingest 401s."
             )
 
     def require_whoop(self) -> None:
@@ -149,6 +159,7 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
             required=False,
             default="http://localhost:8080/callback",
         ),
+        mfp_session_cookie=_get(env, "MFP_SESSION_COOKIE", required=False),
         anthropic_api_key=_get(env, "ANTHROPIC_API_KEY", required=False),
         google_api_key=_get(env, "GOOGLE_API_KEY", required=False),
         llm_provider=provider,

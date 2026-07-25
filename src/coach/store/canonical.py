@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 
 from ..normalize.healthkit import WeightPartial
+from ..normalize.myfitnesspal import FoodEntryRow
 from ..normalize.whoop import RecoveryRow, WorkoutRow
 
 
@@ -137,6 +138,50 @@ def upsert_weight(
     return wid
 
 
+def food_id(row: FoodEntryRow) -> str:
+    """Deterministic id from the MFP diary-item id (or its positional fallback).
+
+    One canonical row per logged item; re-normalizing the same raw yields the
+    same key, so ``--rebuild`` is byte-identical (§2.1).
+    """
+    return f"food:{row.user_id}:{row.source}:{row.external_id}"
+
+
+def upsert_food(
+    conn: sqlite3.Connection, row: FoodEntryRow, *, raw_ref: str, derived_at: str
+) -> str:
+    fid = food_id(row)
+    conn.execute(
+        "INSERT OR REPLACE INTO food_entry (id, user_id, day_key, source, source_app, "
+        "entry_type, consumed_at, tz_name, utc_offset, description, quantity, unit, "
+        "kcal, protein_g, carbs_g, fat_g, fiber_g, alcohol_g, raw_ref, derived_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            fid,
+            row.user_id,
+            row.day_key,
+            row.source,
+            row.source_app,
+            row.entry_type,
+            row.consumed_at,
+            row.tz_name,
+            row.utc_offset,
+            row.description,
+            row.quantity,
+            row.unit,
+            row.kcal,
+            row.protein_g,
+            row.carbs_g,
+            row.fat_g,
+            row.fiber_g,
+            row.alcohol_g,
+            raw_ref,
+            derived_at,
+        ),
+    )
+    return fid
+
+
 def canonical_fingerprint(conn: sqlite3.Connection) -> str:
     """Stable digest of all canonical rows EXCLUDING volatile ``derived_at``.
 
@@ -163,5 +208,11 @@ def canonical_fingerprint(conn: sqlite3.Connection) -> str:
         "weight_kg,body_fat_pct,lean_mass_kg,raw_ref"
     )
     for r in conn.execute(f"SELECT {wt_cols} FROM weight_measurement ORDER BY id"):
+        parts.append("|".join("" if v is None else str(v) for v in r))
+    food_cols = (
+        "id,user_id,day_key,source,source_app,entry_type,consumed_at,tz_name,utc_offset,"
+        "description,quantity,unit,kcal,protein_g,carbs_g,fat_g,fiber_g,alcohol_g,raw_ref"
+    )
+    for r in conn.execute(f"SELECT {food_cols} FROM food_entry ORDER BY id"):
         parts.append("|".join("" if v is None else str(v) for v in r))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()

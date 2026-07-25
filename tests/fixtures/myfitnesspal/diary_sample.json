@@ -1,0 +1,59 @@
+{
+  "_synthetic": "SYNTHETIC fixture — hand-authored, NOT a real MFP response. Field shape is reconstructed from the web client's write payload and must reconcile against a live read (CLAUDE.md §6.2, §10.2).",
+  "items": [
+    {
+      "id": "111",
+      "type": "food_entry",
+      "meal_name": "Breakfast",
+      "servings": 1.0,
+      "food": {"description": "Oatmeal, rolled"},
+      "serving_size": {"value": 1, "unit": "cup"},
+      "nutritional_contents": {
+        "energy": {"value": 150.0, "unit": "calories"},
+        "protein": 5.0,
+        "carbohydrates": 27.0,
+        "fat": 3.0,
+        "fiber": 4.0
+      }
+    },
+    {
+      "id": "222",
+      "type": "food_entry",
+      "meal_name": "Lunch",
+      "servings": 1.5,
+      "food": {"description": "Chicken breast, grilled"},
+      "serving_size": {"value": 150, "unit": "g"},
+      "nutritional_contents": {
+        "energy": 248.0,
+        "protein": 46.5,
+        "carbohydrates": 0.0,
+        "fat": 5.4
+      }
+    },
+    {
+      "id": "333",
+      "type": "food_entry",
+      "meal_name": "Snacks",
+      "servings": 1.0,
+      "food": {"description": "Protein bar"},
+      "serving_size": {"value": 1, "unit": "bar"},
+      "nutritional_contents": {
+        "energy": {"value": 837.0, "unit": "kilojoules"},
+        "protein": 20.0,
+        "carbohydrates": 22.0,
+        "fat": 7.0
+      }
+    },
+    {
+      "type": "food_entry",
+      "meal_name": "Dinner",
+      "servings": 1.0,
+      "food": {"description": "Mixed salad"},
+      "nutritional_contents": {
+        "energy": {"value": 90.0, "unit": "calories"},
+        "protein": 3.0,
+        "carbohydrates": 12.0
+      }
+    }
+  ]
+}

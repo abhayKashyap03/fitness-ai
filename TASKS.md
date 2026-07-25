@@ -284,12 +284,30 @@ Work in order; recon before code.
 
 ---
 
-## Phase 6 — MyFitnessPal nutrition (direct CSV adapter)
+## Phase 6A — MyFitnessPal DIRECT v2 API adapter (SHIPPED 2026-07-24, branch `feat/mfp-adapter`)
 
-**Why (2026-07-19c):** the real food history (consistent Feb–June logging) lives
-on MFP, not in Apple Health. Source = MFP **Privacy Center → "Download My Data"**
-full export (free, CCPA/GDPR; NOT the closed API, NOT scraping — §12). Zip
-expected ~2026-07-20. Work in order; **recon before code** (WHOOP-404 lesson).
+**Why:** the user wanted daily food flow without a manual export each day. §12's
+scrape ban was **overridden with sign-off** for the user's own account
+(ADR-0010); `raw_events.source` CHECK **dropped entirely** (ADR-0009, §2.5).
+
+- [x] **Recon** — read both community libs; established cookie→bearer→v2 auth
+  chain and JSON-not-HTML read (no lxml). §10.2 first-contact reconciliation noted.
+- [x] **Adapter** `adapters/myfitnesspal/` (auth/client/ingest), stdlib + httpx,
+  zero new deps. **Normalizer** `normalize/myfitnesspal.py` (pure). `upsert_food`.
+- [x] **Migration 0006** (raw_events CHECK drop + food_entry widen + views);
+  runner hardened for parent-table rebuilds. **CLI** `ingest mfp`. Config +
+  `.env.example`. 223 tests green; ruff + mypy clean.
+- [ ] **LIVE verify (human):** paste `MFP_SESSION_COOKIE`, `coach ingest mfp
+  --since <date>` → `normalize` → `status`. **Expect a field reconciliation** on
+  the v2 diary READ shape — fix is one-line in the adapter + fixture if it 400s.
+
+## Phase 6B — MyFitnessPal CSV backfill (still valid, secondary)
+
+**Why (2026-07-19c):** the MFP **Privacy Center → "Download My Data"** full export
+(free, CCPA/GDPR) remains a sanctioned OCCASIONAL backfill for history the daily
+API path misses. Not blocked; lower priority now the API path exists. Work in
+order; **recon before code** (WHOOP-404 lesson). The `raw_events` source CHECK is
+already gone, so T6.2's old D4 gate no longer applies.
 
 - [ ] **T6.0 — Receive + protect the export** — user drops CSV(s) in a gitignored
   local dir (`data/mfp/`). Confirm never staged/committed (same rigor as T5.0).

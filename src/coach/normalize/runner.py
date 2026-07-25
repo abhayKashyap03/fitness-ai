@@ -11,9 +11,10 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from ..store.canonical import upsert_recovery, upsert_weight, upsert_workout
+from ..store.canonical import upsert_food, upsert_recovery, upsert_weight, upsert_workout
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
 from .healthkit import parse_body_record
+from .myfitnesspal import parse_diary
 from .whoop import parse_recovery, parse_workout
 
 
@@ -70,6 +71,7 @@ def normalize_all(
         conn.execute("DELETE FROM recovery")
         conn.execute("DELETE FROM workout")
         conn.execute("DELETE FROM weight_measurement")
+        conn.execute("DELETE FROM food_entry")
 
     offsets = _cycle_offsets(conn)
     resp_rates = _sleep_resp_rates(conn)
@@ -98,6 +100,7 @@ def normalize_all(
         n_wk += 1
 
     n_wt, n_wt_skipped = _normalize_healthkit_weight(conn, user_id, derived_at)
+    n_food = _normalize_mfp_food(conn, user_id, derived_at)
 
     n_groups = _regroup_workouts(conn, tolerance_s)
     conn.commit()
@@ -106,6 +109,7 @@ def normalize_all(
         "workout": n_wk,
         "weight": n_wt,
         "weight_skipped": n_wt_skipped,
+        "food": n_food,
         "workout_groups": n_groups,
     }
 
@@ -139,6 +143,42 @@ def _normalize_healthkit_weight(
         )
         n += 1
     return n, skipped
+
+
+def _normalize_mfp_food(conn: sqlite3.Connection, user_id: int, derived_at: str) -> int:
+    """Derive food_entry rows from raw MyFitnessPal diary events.
+
+    A day edited in MFP produces sibling raw rows sharing one external_id
+    (``mfp:diary:<day>``); the NEWEST ingested version wins, so a re-log
+    replaces yesterday's snapshot rather than double-counting (§2.3). Returns
+    the number of food items written.
+    """
+    # A diary day is a COLLECTION whose membership changes on edit, so stale
+    # items would orphan under INSERT-OR-REPLACE (unlike 1:1 weight/recovery
+    # rows). The MFP slice is fully regenerable from raw, so clear + rebuild it
+    # (no-op on a rebuild=True run — the table was already emptied). Scoped to
+    # source='myfitnesspal' so HealthKit/other food siblings are untouched.
+    conn.execute("DELETE FROM food_entry WHERE source='myfitnesspal'")
+
+    # newest raw row per day (external_id). ingested_at is second-precision, so
+    # two ingests in the same second tie — break on rowid, which is monotonic
+    # with insertion order (a uuid id would tie randomly and could pick the
+    # stale snapshot). Last writer in iteration order wins the dict slot.
+    newest: dict[str, sqlite3.Row] = {}
+    for r in conn.execute(
+        "SELECT id, external_id, payload FROM raw_events "
+        "WHERE source='myfitnesspal' AND record_type='diary' "
+        "ORDER BY ingested_at, rowid"
+    ).fetchall():
+        newest[str(r["external_id"])] = r
+
+    n = 0
+    for r in newest.values():
+        record = json.loads(r["payload"])
+        for row in parse_diary(record, user_id=user_id):
+            upsert_food(conn, row, raw_ref=r["id"], derived_at=derived_at)
+            n += 1
+    return n
 
 
 def _regroup_workouts(conn: sqlite3.Connection, tolerance_s: int) -> int:
