@@ -129,6 +129,37 @@ def get_recovery_history(
     }
 
 
+def get_sleep_history(
+    conn: sqlite3.Connection, *, end: str, window: int = 14, user_id: int = 1
+) -> dict:
+    """Resolved night-sleep rows over a window (naps excluded by the resolver).
+
+    Objective stage durations are cross-source comparable; the composite
+    percentages are the source's own scoring (is_official flags it) and are
+    NOT comparable across sources (§2.3).
+    """
+    from datetime import date, timedelta
+
+    end_d = date.fromisoformat(end)
+    start = (end_d - timedelta(days=window - 1)).isoformat()
+    rows = conn.execute(
+        "SELECT day_key, source, in_bed_min, awake_min, light_min, sws_min, rem_min, "
+        "sleep_cycle_count, disturbance_count, respiratory_rate, performance_pct, "
+        "efficiency_pct, is_official "
+        "FROM sleep_resolved WHERE user_id = ? AND day_key BETWEEN ? AND ? "
+        "ORDER BY day_key",
+        (user_id, start, end),
+    ).fetchall()
+    series = [dict(r) for r in rows]
+    return {
+        "end": end,
+        "window": window,
+        "unit": "minutes",
+        "series": series,
+        "insufficient": None if series else {"have": 0, "needed": 1},
+    }
+
+
 def get_tdee_estimate(
     conn: sqlite3.Connection, *, end: str, window: int = 14, user_id: int = 1
 ) -> dict:
@@ -235,6 +266,19 @@ TOOLS: list[ToolSpec] = [
             "properties": {"end": _DAY, "window": _WINDOW},
         },
         handler=get_recovery_history,
+    ),
+    ToolSpec(
+        name="get_sleep_history",
+        description=(
+            "Resolved night-sleep rows over a window: stage minutes (in-bed, "
+            "light, slow-wave, REM, awake), disturbances, respiratory rate, "
+            "and the source's composite percentages. Naps excluded."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"end": _DAY, "window": _WINDOW},
+        },
+        handler=get_sleep_history,
     ),
     ToolSpec(
         name="get_tdee_estimate",

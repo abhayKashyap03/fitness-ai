@@ -84,6 +84,30 @@ def test_normalize_populates_canonical(migrated_conn):
     assert row["tz_name"] is None
 
 
+def test_sleep_canonicalized_and_resolver_excludes_nap(migrated_conn):
+    _seed(migrated_conn)
+    counts = normalize_all(migrated_conn)
+    # 3 sleep records: full night + nap scored, third PENDING -> skipped (§2.7)
+    assert counts["sleep"] == 2
+    rows = {
+        r["external_id"]: r
+        for r in migrated_conn.execute(
+            "SELECT external_id, day_key, is_nap, in_bed_min, raw_ref FROM sleep"
+        )
+    }
+    night = rows["18271190-0064-4ff1-a66b-02b87b3285ca"]
+    assert night["day_key"] == "2026-06-01"  # end 14:32Z at -04:00 -> local 06-01
+    assert night["is_nap"] == 0 and night["in_bed_min"] == 510.0
+    assert night["raw_ref"] is not None  # provenance intact (§2.3)
+    nap = rows["7b5b5631-0bf9-4ab5-b384-0f106b43ced9"]
+    assert nap["is_nap"] == 1
+    # resolver: one NIGHT sleep per day; the nap never wins a day slot
+    resolved = migrated_conn.execute(
+        "SELECT day_key, is_nap FROM sleep_resolved ORDER BY day_key"
+    ).fetchall()
+    assert [(r["day_key"], r["is_nap"]) for r in resolved] == [("2026-06-01", 0)]
+
+
 def test_resp_rate_joined_from_sleep(migrated_conn):
     """Respiratory rate lives on the sleep record; joined into recovery by sleep_id."""
     _seed(migrated_conn)

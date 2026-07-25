@@ -1,17 +1,89 @@
 {
-  "_synthetic": "SYNTHETIC fixture (CLAUDE.md §6.2) — fabricated sleep records, NOT a recorded API response. Minimal shape: only the fields the normalizer join reads (id, score.respiratory_rate), ids matched to the real scrubbed recovery fixtures' sleep_id values.",
+  "_synthetic": "SYNTHETIC fixture (CLAUDE.md §6.2) — fabricated sleep records, NOT a recorded API response. Field SHAPE mirrors the live v2 payload (verified 2026-07-25 against real raw_events rows + developer.whoop.com); values invented. Ids matched to the recovery fixtures' sleep_id values. Record 1: full night ending morning of 06-01 in -04:00. Record 2: scored nap. Record 3: unscored (normalizer must skip).",
   "records": [
     {
       "id": "18271190-0064-4ff1-a66b-02b87b3285ca",
+      "v1_id": null,
+      "cycle_id": 1539008513,
+      "user_id": 1,
+      "created_at": "2026-06-01T14:35:00.000Z",
+      "updated_at": "2026-06-01T14:40:00.000Z",
+      "start": "2026-06-01T03:02:11.000Z",
       "end": "2026-06-01T14:32:32.563Z",
+      "timezone_offset": "-04:00",
+      "nap": false,
       "score_state": "SCORED",
-      "score": { "respiratory_rate": 16.25 }
+      "score": {
+        "stage_summary": {
+          "total_in_bed_time_milli": 30600000,
+          "total_awake_time_milli": 2700000,
+          "total_no_data_time_milli": 0,
+          "total_light_sleep_time_milli": 14400000,
+          "total_slow_wave_sleep_time_milli": 6300000,
+          "total_rem_sleep_time_milli": 7200000,
+          "sleep_cycle_count": 5,
+          "disturbance_count": 9
+        },
+        "sleep_needed": {
+          "baseline_milli": 27600000,
+          "need_from_sleep_debt_milli": 1200000,
+          "need_from_recent_strain_milli": 600000,
+          "need_from_recent_nap_milli": 0
+        },
+        "respiratory_rate": 16.25,
+        "sleep_performance_percentage": 91.0,
+        "sleep_consistency_percentage": 74.0,
+        "sleep_efficiency_percentage": 93.5
+      }
     },
     {
       "id": "7b5b5631-0bf9-4ab5-b384-0f106b43ced9",
+      "v1_id": null,
+      "cycle_id": 999999,
+      "user_id": 1,
+      "created_at": "2026-06-02T13:15:00.000Z",
+      "updated_at": "2026-06-02T13:16:00.000Z",
+      "start": "2026-06-02T12:05:00.000Z",
       "end": "2026-06-02T13:11:04.120Z",
+      "timezone_offset": "-04:00",
+      "nap": true,
       "score_state": "SCORED",
-      "score": { "respiratory_rate": 15.8 }
+      "score": {
+        "stage_summary": {
+          "total_in_bed_time_milli": 3960000,
+          "total_awake_time_milli": 300000,
+          "total_no_data_time_milli": 0,
+          "total_light_sleep_time_milli": 3060000,
+          "total_slow_wave_sleep_time_milli": 600000,
+          "total_rem_sleep_time_milli": 0,
+          "sleep_cycle_count": 1,
+          "disturbance_count": 1
+        },
+        "sleep_needed": {
+          "baseline_milli": 27600000,
+          "need_from_sleep_debt_milli": 900000,
+          "need_from_recent_strain_milli": 0,
+          "need_from_recent_nap_milli": 0
+        },
+        "respiratory_rate": 15.8,
+        "sleep_performance_percentage": null,
+        "sleep_consistency_percentage": null,
+        "sleep_efficiency_percentage": 88.0
+      }
+    },
+    {
+      "id": "aaaa1111-2222-3333-4444-555566667777",
+      "v1_id": null,
+      "cycle_id": 1541375428,
+      "user_id": 1,
+      "created_at": "2026-06-03T12:00:00.000Z",
+      "updated_at": "2026-06-03T12:00:00.000Z",
+      "start": "2026-06-03T03:10:00.000Z",
+      "end": "2026-06-03T11:05:00.000Z",
+      "timezone_offset": "-04:00",
+      "nap": false,
+      "score_state": "PENDING_SCORE",
+      "score": null
     }
   ],
   "next_token": null

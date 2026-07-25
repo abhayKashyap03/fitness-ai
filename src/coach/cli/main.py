@@ -331,6 +331,15 @@ def _cmd_status(settings: Settings, args: argparse.Namespace) -> int:
         )
     else:
         print("  recovery: — (none)")
+    if s.sleep:
+        sl = s.sleep
+        print(
+            f"  sleep [{sl.source}]: {_fmt(sl.in_bed_min, 'min')} in bed  "
+            f"sws={_fmt(sl.sws_min, 'min')} rem={_fmt(sl.rem_min, 'min')} "
+            f"eff={_fmt(sl.efficiency_pct, '%')}"
+        )
+    else:
+        print("  sleep: — (none)")
     if s.weight:
         w = s.weight
         print(f"  weight [{w.source}]: {_fmt(w.weight_kg, 'kg')} (trend {_fmt(w.trend_kg, 'kg')})")

@@ -61,6 +61,93 @@ class WorkoutRow:
     hr_zones_json: str | None
 
 
+@dataclass(frozen=True)
+class SleepRow:
+    user_id: int
+    day_key: str  # local day the sleep ENDED (the physiological day it serves)
+    source: str
+    external_id: str
+    is_nap: int
+    start_at: str
+    end_at: str
+    tz_name: str | None
+    utc_offset: str | None
+    in_bed_min: float | None
+    awake_min: float | None
+    light_min: float | None
+    sws_min: float | None
+    rem_min: float | None
+    no_data_min: float | None
+    sleep_cycle_count: int | None
+    disturbance_count: int | None
+    respiratory_rate: float | None
+    need_baseline_min: float | None
+    need_from_debt_min: float | None
+    need_from_strain_min: float | None
+    need_from_nap_min: float | None
+    performance_pct: float | None
+    consistency_pct: float | None
+    efficiency_pct: float | None
+    score_method: str | None
+    is_official: int
+
+
+def _milli_to_min(milli: object) -> float | None:
+    """Milliseconds -> minutes (1 dp); absent stays absent (§2.7)."""
+    if not isinstance(milli, int | float) or isinstance(milli, bool):
+        return None
+    return round(milli / 60_000, 1)
+
+
+def parse_sleep(payload: dict, *, user_id: int = 1) -> SleepRow | None:
+    """WHOOP sleep record -> SleepRow. Returns None if unscored or id-less.
+
+    Self-contained: the record carries its own ``timezone_offset``. ``day_key``
+    is derived from the END instant — the night of the 14th/15th belongs to the
+    15th, the day the sleep serves. Missing sub-objects leave NULLs.
+    """
+    if payload.get("score_state") != "SCORED":
+        return None
+    ext = payload.get("id")
+    start, end = payload.get("start"), payload.get("end")
+    if ext is None or not start or not end:
+        return None
+    offset = payload.get("timezone_offset")
+    score = payload.get("score") or {}
+    stages = score.get("stage_summary") or {}
+    need = score.get("sleep_needed") or {}
+
+    return SleepRow(
+        user_id=user_id,
+        day_key=day_key(end, offset),
+        source="whoop_api",
+        external_id=str(ext),
+        is_nap=int(bool(payload.get("nap"))),
+        start_at=to_utc_iso(parse_instant(start)),
+        end_at=to_utc_iso(parse_instant(end)),
+        tz_name=None,  # WHOOP is offset-only; IANA unknown (§2.6)
+        utc_offset=normalize_offset(offset),
+        in_bed_min=_milli_to_min(stages.get("total_in_bed_time_milli")),
+        awake_min=_milli_to_min(stages.get("total_awake_time_milli")),
+        light_min=_milli_to_min(stages.get("total_light_sleep_time_milli")),
+        sws_min=_milli_to_min(stages.get("total_slow_wave_sleep_time_milli")),
+        rem_min=_milli_to_min(stages.get("total_rem_sleep_time_milli")),
+        no_data_min=_milli_to_min(stages.get("total_no_data_time_milli")),
+        sleep_cycle_count=stages.get("sleep_cycle_count"),
+        disturbance_count=stages.get("disturbance_count"),
+        respiratory_rate=score.get("respiratory_rate"),
+        need_baseline_min=_milli_to_min(need.get("baseline_milli")),
+        need_from_debt_min=_milli_to_min(need.get("need_from_sleep_debt_milli")),
+        need_from_strain_min=_milli_to_min(need.get("need_from_recent_strain_milli")),
+        need_from_nap_min=_milli_to_min(need.get("need_from_recent_nap_milli")),
+        performance_pct=score.get("sleep_performance_percentage"),
+        consistency_pct=score.get("sleep_consistency_percentage"),
+        efficiency_pct=score.get("sleep_efficiency_percentage"),
+        score_method="whoop_proprietary",
+        is_official=1,
+    )
+
+
 def parse_recovery(
     payload: dict,
     *,

@@ -40,6 +40,7 @@ def test_tool_specs_shape():
         "get_daily_status",
         "get_weight_trend",
         "get_recovery_history",
+        "get_sleep_history",
         "get_tdee_estimate",
         "get_safety_flags",
     }
@@ -130,6 +131,13 @@ def test_recovery_history_empty_is_insufficient(seeded_conn):
     out = tools.get_recovery_history(seeded_conn, end=WEIGH_DAY, window=7)
     assert out["series"] == []
     assert out["insufficient"] == {"have": 0, "needed": 1}
+
+
+def test_sleep_history_empty_is_insufficient_and_json_safe(seeded_conn):
+    out = tools.get_sleep_history(seeded_conn, end=WEIGH_DAY, window=7)
+    assert out["series"] == []
+    assert out["insufficient"] == {"have": 0, "needed": 1}
+    assert _json_roundtrips(out)
 
 
 def test_tdee_insufficient_returns_null_estimate_not_a_number(seeded_conn):
