@@ -36,6 +36,34 @@ class Settings:
     whoop_client_secret: str = field(default="", repr=False)
     whoop_redirect_uri: str = "http://localhost:8080/callback"
     anthropic_api_key: str = field(default="", repr=False)
+    google_api_key: str = field(default="", repr=False)
+    llm_provider: str = "google"  # 'google' (free tier) | 'anthropic'
+    coach_model: str = ""  # empty -> provider default (see coach.coach.llm)
+
+    @property
+    def llm_api_key(self) -> str:
+        """The API key for the configured provider (never logged, §8.4)."""
+        return (
+            self.anthropic_api_key
+            if self.llm_provider == "anthropic"
+            else self.google_api_key
+        )
+
+    def require_llm(self) -> None:
+        """Raise a clear error if the configured provider's API key is absent."""
+        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ConfigError(
+                "ANTHROPIC_API_KEY is missing (COACH_LLM_PROVIDER=anthropic). "
+                "Billed per token, separate from any Claude subscription (§8.7). "
+                "Create one at https://console.anthropic.com/settings/keys, or "
+                "switch COACH_LLM_PROVIDER=google for the free tier."
+            )
+        if self.llm_provider == "google" and not self.google_api_key:
+            raise ConfigError(
+                "GOOGLE_API_KEY is missing (COACH_LLM_PROVIDER=google). "
+                "Create a free-tier key at https://aistudio.google.com/apikey "
+                "and add it to .env (see .env.example)."
+            )
 
     def require_whoop(self) -> None:
         """Raise a clear error if WHOOP OAuth credentials are absent."""
@@ -101,6 +129,12 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
     if units not in {"metric", "imperial"}:
         raise ConfigError(f"COACH_UNITS must be 'metric' or 'imperial', got {units!r}.")
 
+    provider = _get(env, "COACH_LLM_PROVIDER", required=False, default="google").lower()
+    if provider not in {"google", "anthropic"}:
+        raise ConfigError(
+            f"COACH_LLM_PROVIDER must be 'google' or 'anthropic', got {provider!r}."
+        )
+
     return Settings(
         db_path=db_path,
         user_id=user_id,
@@ -116,4 +150,8 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
             default="http://localhost:8080/callback",
         ),
         anthropic_api_key=_get(env, "ANTHROPIC_API_KEY", required=False),
+        google_api_key=_get(env, "GOOGLE_API_KEY", required=False),
+        llm_provider=provider,
+        # empty -> the provider's own default model (coach.coach.llm)
+        coach_model=_get(env, "COACH_MODEL", required=False),
     )

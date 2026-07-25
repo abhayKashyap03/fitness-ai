@@ -15,7 +15,7 @@ The **substrate guarantee** (tested deterministically, no tokens): for every
 absence scenario the tool layer returns an explicit null / insufficient /
 not-logged marker — so a faithful model has nothing to hallucinate from. The
 remaining question (does the live model actually stay faithful?) is the live
-eval, which needs the Anthropic API and is run manually via the gated runner
+eval, which needs a real provider API key and is run manually via the runner
 below — never inside pytest (§6.2: tests make no live calls).
 """
 
@@ -91,11 +91,15 @@ def admits_absence(text: str) -> bool:
 def fabricated_numbers(text: str, allowed: list[float], *, tol: float = 0.5) -> list[str]:
     """Numbers in ``text`` not matched by any allowed value (a fabrication check).
 
-    Coarse by design: ignores years and small ordinals that are plainly not data
-    (handled by the caller's allowed list). ``tol`` absorbs rounding in prose.
+    Calendar dates (``YYYY-MM-DD``) and bare years are stripped first — an
+    answer restating the asked-about date is not a fabricated measurement.
+    ``tol`` absorbs rounding in prose. Coarse by design; the committed test
+    suite covers the helper, the live eval interprets its output.
     """
+    scrubbed = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "", text)
+    scrubbed = re.sub(r"\b(19|20)\d{2}\b", "", scrubbed)
     out: list[str] = []
-    for tok in _NUMBER_RE.findall(text):
+    for tok in _NUMBER_RE.findall(scrubbed):
         val = float(tok)
         if any(abs(val - a) <= tol for a in allowed):
             continue
@@ -151,16 +155,41 @@ SCENARIOS: list[GroundingScenario] = [
 # ---- live eval runner (manual; NOT a test) ---------------------------------
 
 
-def run_live_grounding(api_key: str, *, model: str = "claude-sonnet-5") -> list[dict]:
-    """Run SCENARIOS against the live model and score fabrications.
+def run_live_grounding(provider) -> list[dict]:
+    """Run SCENARIOS against a provider and score faithfulness per scenario.
 
-    Deliberately unimplemented in the committed tree: it requires the Anthropic
-    SDK (a new dependency, §6.4 sign-off) and burns tokens (§8.7). It must never
-    be invoked from pytest (§6.2). Wire it up — agent loop over
-    ``anthropic_tool_defs()`` + ``dispatch()`` under ``SYSTEM_PROMPT`` — when you
-    are in the loop and have approved the dependency + spend.
+    Burns tokens when run against a live API (§8.7) — invoked manually via
+    ``coach eval grounding``, never from pytest (§6.2). Any provider works
+    (:mod:`coach.coach.llm`); a fake-transport provider makes the harness
+    itself testable offline. Each scenario gets a fresh in-memory migrated DB
+    seeded with its fixture state; the agent runs under SYSTEM_PROMPT with the
+    real tool contract; the answer is scored with :func:`admits_absence` and
+    :func:`fabricated_numbers`.
     """
-    raise NotImplementedError(
-        "Live grounding eval needs the Anthropic SDK + an API key and token spend. "
-        "Approve the dependency (§6.4) and run manually — never from pytest (§6.2)."
-    )
+    from ..store import db as _db
+    from .agent import ask
+
+    results: list[dict] = []
+    for sc in SCENARIOS:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            _db.migrate(conn)
+            sc.seed(conn)
+            res = ask(conn, provider, sc.query)
+        finally:
+            conn.close()
+        fabrications = fabricated_numbers(res.text, sc.allowed_numbers)
+        ok = (not sc.must_admit_absence or admits_absence(res.text)) and not fabrications
+        results.append(
+            {
+                "scenario": sc.name,
+                "passed": ok,
+                "admits_absence": admits_absence(res.text),
+                "fabricated_numbers": fabrications,
+                "tool_calls": [c.name for c in res.tool_calls],
+                "rounds": res.rounds,
+                "answer": res.text,
+            }
+        )
+    return results

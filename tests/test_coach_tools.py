@@ -34,18 +34,19 @@ def _json_roundtrips(obj) -> bool:
 # ---- registry / API surface ------------------------------------------------
 
 
-def test_anthropic_tool_defs_shape():
-    defs = tools.anthropic_tool_defs()
-    assert {d["name"] for d in defs} == {
+def test_tool_specs_shape():
+    specs = tools.tool_specs()
+    assert {d.name for d in specs} == {
         "get_daily_status",
         "get_weight_trend",
         "get_recovery_history",
         "get_tdee_estimate",
         "get_safety_flags",
     }
-    for d in defs:
-        assert set(d) == {"name", "description", "input_schema"}  # no handler leaked
-        assert d["input_schema"]["type"] == "object"
+    for d in specs:
+        assert not hasattr(d, "handler")  # no handler leaked to the provider
+        assert d.input_schema["type"] == "object"
+        assert d.description
 
 
 def test_dispatch_unknown_tool_raises(seeded_conn):

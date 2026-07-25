@@ -25,6 +25,45 @@
 
 ---
 
+## Session 2026-07-20 (b) — revamp session 2: `coach ask` (branch `revamp/coach-ask`)
+
+Phase 4 completed: the coach actually coaches. **Zero new dependencies** —
+stdlib urllib Messages client (§6.4; no cloud SDK), injectable transport so
+tests never touch the network (§6.2), bounded retries honoring retry-after,
+prompt caching on SYSTEM_PROMPT (§8.7), secrets never logged (§8.4).
+
+- `coach/llm.py` client + `coach/agent.py` bounded loop (MAX_ROUNDS=8) over the
+  deterministic tool contract; refusal/pause_turn/max_tokens/unknown-tool/round-
+  exhaustion all explicit.
+- `run_live_grounding` implemented (was gated stub) — per-scenario fresh
+  in-memory DB, scored via admits_absence + fabricated_numbers (date-tolerant).
+- CLI: `coach ask "…" [--show-tools]`, `coach eval grounding` (exit 1 on any
+  fabrication). `COACH_MODEL` default claude-opus-4-8, overridable (§8.7).
+- Intentional test change (§6.2): `test_live_runner_is_gated` (asserted
+  NotImplementedError) replaced — the runner is now the feature; offline
+  coverage lives in `test_coach_agent.py` (fake transport).
+- 176 tests green; ruff + mypy clean.
+### Provider-agnostic follow-up (same branch, user request: no paid credits)
+- `llm.py` → `coach/llm/` package mirroring `adapters/`: canonical conversation
+  shape in `base.py`, one module per vendor (`google.py`, `anthropic.py`),
+  `PROVIDERS` registry + `build_provider()`. Agent loop never sees a vendor
+  field name (§2.5) — switching providers is a config value.
+- **Default provider = Google Gemini** (`gemini-2.5-flash`, real free tier).
+  Anthropic kept as an option. `COACH_LLM_PROVIDER`, `GOOGLE_API_KEY`,
+  `COACH_MODEL` (empty ⇒ provider default).
+- Gemini translation notes: role `model` not `assistant`; functionResponse
+  matched by **name** (no call id — canonical ToolResult carries both);
+  functionDeclarations need an OpenAPI subset (types upper-cased, `minimum`
+  stripped or 400); SAFETY/RECITATION ⇒ canonical refusal; implicit caching.
+- Keys in headers only, never URL params (§8.4) — asserted by test.
+- Agent-loop tests **parametrized across both providers** — identical behavior
+  is the proof of the abstraction. 200 tests green; ruff + mypy clean.
+
+- **Human steps:** get a free key at aistudio.google.com/apikey → `GOOGLE_API_KEY`
+  in `.env`; run `coach doctor`, then `coach ask "how am I doing?" --show-tools`
+  and `coach eval grounding`. Session 3 (BLE ADR, gap-aware EWMA, HRV validation
+  harness, README) still queued.
+
 ## Session 2026-07-20 (a) — revamp session 1: correctness + friction (branch `revamp/core-upgrades`)
 
 User granted full creative latitude (reviews PR before merge). Three-session plan;

@@ -26,6 +26,7 @@ from ..compute.daily import daily_status
 from ..compute.guardrails import Alert, TrendPoint, weight_loss_rate_alert
 from ..compute.tdee import build_window, estimate_tdee
 from ..compute.trends import Insufficient
+from .llm import ToolSpec as LLMToolSpec
 
 Handler = Callable[..., dict]
 
@@ -268,10 +269,14 @@ TOOLS: list[ToolSpec] = [
 _BY_NAME = {t.name: t for t in TOOLS}
 
 
-def anthropic_tool_defs() -> list[dict]:
-    """The tool definitions to pass to the Messages API (no handlers leaked)."""
+def tool_specs() -> list[LLMToolSpec]:
+    """Provider-neutral tool definitions (no handlers leaked).
+
+    Each LLM provider translates these into its own schema at its own boundary
+    (§2.5) — this contract stays vendor-free.
+    """
     return [
-        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+        LLMToolSpec(name=t.name, description=t.description, input_schema=t.input_schema)
         for t in TOOLS
     ]
 
