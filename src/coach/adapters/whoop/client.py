@@ -139,5 +139,12 @@ class WhoopClient:
         return list(self._paginate("/v2/activity/workout", self._window(start, end)))
 
     def get_body_measurement(self) -> dict:
-        """Body measurements are a single object, not a paginated collection."""
+        """Body measurement is a SINGLE object, not a paginated collection.
+
+        WHOOP v2 `/v2/user/measurement/body` returns exactly
+        ``{height_meter, weight_kilogram, max_heart_rate}`` — no id, no
+        timestamp (confirmed against developer.whoop.com). Returned verbatim;
+        do NOT wrap in ``list()`` (that would keep the dict KEYS and drop the
+        numbers).
+        """
         return self._get("/v2/user/measurement/body", {})

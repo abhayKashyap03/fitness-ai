@@ -1,0 +1,43 @@
+{
+  "_synthetic": "SYNTHETIC but STRUCTURALLY REAL — mirrors a live api.myfitnesspal.com/v2/diary response (per-meal `diary_meal` aggregates; `items` also carries non-food `exercise_entry`/`steps_aggregate` rows). Macro values are made up, not real diet data. §6.2/§10.2.",
+  "items": [
+    {
+      "type": "diary_meal",
+      "date": "2026-06-15",
+      "diary_meal": "Breakfast",
+      "nutritional_contents": {
+        "protein": 10.0,
+        "fat": 5.0,
+        "carbohydrates": 30.0,
+        "fiber": 4.0,
+        "sugar": 8.0,
+        "sodium": 100.0,
+        "energy": {"unit": "calories", "value": 200.0}
+      }
+    },
+    {
+      "type": "diary_meal",
+      "date": "2026-06-15",
+      "diary_meal": "Dinner",
+      "nutritional_contents": {
+        "protein": 40.0,
+        "fat": 20.0,
+        "carbohydrates": 50.0,
+        "energy": {"unit": "calories", "value": 600.0}
+      }
+    },
+    {
+      "type": "exercise_entry",
+      "date": "2026-06-15",
+      "id": "SCRUBBED-exercise-id",
+      "is_calorie_adjustment": true,
+      "energy": {"unit": "calories", "value": 1.0}
+    },
+    {
+      "type": "steps_aggregate",
+      "date": "2026-06-15",
+      "steps": 354,
+      "energy": {"unit": "calories", "value": 1}
+    }
+  ]
+}

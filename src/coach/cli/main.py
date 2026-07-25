@@ -218,6 +218,60 @@ def _cmd_ingest_healthkit(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _mfp_client(settings: Settings):
+    from ..adapters.myfitnesspal.auth import MfpAuth, MfpTokenStore
+    from ..adapters.myfitnesspal.client import MfpClient
+    from ..paths import mfp_token_path
+
+    auth = MfpAuth(settings.mfp_session_cookie)
+    store = MfpTokenStore(mfp_token_path())
+
+    def creds() -> tuple[str, str]:
+        tok = auth.valid_token(store)
+        return tok.access_token, tok.user_id
+
+    return MfpClient(creds)
+
+
+def _cmd_ingest_mfp(settings: Settings, args: argparse.Namespace) -> int:
+    from datetime import date
+
+    from ..adapters.myfitnesspal.auth import MfpAuthError
+    from ..adapters.myfitnesspal.ingest import auto_since, ingest_mfp
+
+    try:
+        settings.require_mfp()
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        since = args.since or auto_since(conn)
+        if since is None:
+            print(
+                "No MFP data ingested yet — pass an explicit --since for the "
+                "first backfill (e.g. --since 2026-06-01).",
+                file=sys.stderr,
+            )
+            return 2
+        if not args.since:
+            print(f"  (incremental since {since})")
+        until = args.until or date.fromisoformat(_today(settings)).isoformat()
+        client = _mfp_client(settings)
+        result = ingest_mfp(conn, client, since=since, until=until, user_id=settings.user_id)
+    except MfpAuthError as exc:
+        print(f"MFP auth needed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    d, w = result["diary"], result["weight"]
+    print(f"  myfitnesspal  days={result['days']:4d}")
+    print(f"    diary   inserted={d['inserted']:4d} skipped={d['skipped']:4d}")
+    print(f"    weight  inserted={w['inserted']:4d} skipped={w['skipped']:4d}")
+    return 0
+
+
 def _cmd_normalize(settings: Settings, args: argparse.Namespace) -> int:
     conn = db.connect(settings.db_path)
     try:
@@ -439,13 +493,13 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
                 problems += 1
                 print("                  -> run `coach db init`")
             else:
-                for source in ("whoop_api", "healthkit"):
+                for source in ("whoop_api", "healthkit", "myfitnesspal"):
                     row = conn.execute(
                         "SELECT COUNT(*) AS n, MAX(ingested_at) AS last FROM raw_events WHERE source=?",
                         (source,),
                     ).fetchone()
                     last = row["last"] or "never"
-                    print(f"  raw[{source:9}] {row['n']:6d} rows   last ingest: {last}")
+                    print(f"  raw[{source:12}] {row['n']:6d} rows   last ingest: {last}")
         finally:
             conn.close()
     else:
@@ -566,6 +620,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ih.add_argument("--file", required=True, help="path to export.xml or export.zip")
     p_ih.set_defaults(func=_cmd_ingest_healthkit)
+
+    p_im = ingest_sub.add_parser(
+        "mfp", help="ingest MyFitnessPal food diary via its v2 API (session cookie)"
+    )
+    p_im.add_argument(
+        "--since", default=None,
+        help="ISO date start of window (default: incremental from last ingest)",
+    )
+    p_im.add_argument(
+        "--until", default=None, help="ISO date end of window (default: today in COACH_HOME_TZ)"
+    )
+    p_im.set_defaults(func=_cmd_ingest_mfp)
 
     p_norm = sub.add_parser("normalize", help="derive canonical tables from raw")
     p_norm.add_argument("--rebuild", action="store_true", help="drop + re-derive all")

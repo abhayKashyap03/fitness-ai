@@ -34,3 +34,7 @@ def credentials_dir() -> Path:
 
 def whoop_token_path() -> Path:
     return credentials_dir() / "whoop_token.json"
+
+
+def mfp_token_path() -> Path:
+    return credentials_dir() / "mfp_token.json"

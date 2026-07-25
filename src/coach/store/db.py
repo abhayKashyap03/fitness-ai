@@ -153,6 +153,15 @@ def migrate(conn: sqlite3.Connection, directory: Path | None = None) -> list[Mig
     applied: list[Migration] = []
     for mig in pending_migrations(conn, directory):
         conn.commit()  # flush any caller transaction before our explicit one
+        # SQLite's blessed 12-step migration host: FK enforcement OFF for the
+        # duration (it is a no-op INSIDE a transaction, so it must be toggled
+        # here, outside), so a migration can rebuild a table that OTHER tables
+        # reference by FK (e.g. dropping a CHECK on the parent). Integrity is
+        # NOT weakened: `PRAGMA foreign_key_check` runs on the WHOLE database
+        # before COMMIT and rolls the migration back if it left ANY dangling
+        # reference — a stronger guarantee than per-statement enforcement, which
+        # only checks rows a statement happens to touch.
+        conn.execute("PRAGMA foreign_keys = OFF;")
         try:
             conn.execute("BEGIN")
             for stmt in _split_statements(mig.sql):
@@ -161,9 +170,17 @@ def migrate(conn: sqlite3.Connection, directory: Path | None = None) -> list[Mig
                 "INSERT INTO schema_version(version, name, applied_at) VALUES (?, ?, ?)",
                 (mig.version, mig.name, _utcnow_iso()),
             )
+            violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise sqlite3.IntegrityError(
+                    f"migration {mig.version} ({mig.name}) left "
+                    f"{len(violations)} foreign-key violation(s); rolled back"
+                )
             conn.commit()
         except Exception:
             conn.rollback()
             raise
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON;")
         applied.append(mig)
     return applied

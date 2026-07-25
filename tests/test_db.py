@@ -34,8 +34,8 @@ def test_migrate_applies_all_then_idempotent(db_path: Path):
     try:
         assert db.current_version(conn) == 0
         applied = db.migrate(conn)
-        assert [m.version for m in applied] == [1, 2, 3, 4, 5]
-        assert db.current_version(conn) == 5
+        assert [m.version for m in applied] == [1, 2, 3, 4, 5, 6, 7]
+        assert db.current_version(conn) == 7
         # second run is a no-op
         assert db.migrate(conn) == []
         assert db.pending_migrations(conn) == []
@@ -69,6 +69,69 @@ def test_failed_migration_is_atomic(tmp_path: Path, db_path: Path):
         (mdir / "0002_broken.sql").write_text("CREATE TABLE b (x INTEGER);\n")
         assert [m.version for m in db.migrate(conn, mdir)] == [2]
         assert db.current_version(conn) == 2
+    finally:
+        conn.close()
+
+
+def test_migration_leaving_dangling_fk_is_rolled_back(tmp_path: Path, db_path: Path):
+    """The runner drops FK enforcement during a migration but verifies the whole
+    DB with foreign_key_check before COMMIT — a migration that orphans a child
+    row must roll back, so the relaxed enforcement never lets integrity rot in.
+    """
+    import pytest as _pytest
+
+    mdir = tmp_path / "migrations"
+    mdir.mkdir()
+    (mdir / "0001_base.sql").write_text(
+        "CREATE TABLE parent (id TEXT PRIMARY KEY);\n"
+        "CREATE TABLE child (id TEXT PRIMARY KEY, pref TEXT REFERENCES parent(id));\n"
+    )
+    # inserts a child pointing at a non-existent parent -> dangling FK
+    (mdir / "0002_orphan.sql").write_text("INSERT INTO child (id, pref) VALUES ('c1', 'ghost');\n")
+    conn = db.connect(db_path)
+    try:
+        with _pytest.raises(Exception, match="foreign-key violation"):
+            db.migrate(conn, mdir)
+        assert db.current_version(conn) == 1  # 0002 rolled back
+        assert conn.execute("SELECT COUNT(*) FROM child").fetchone()[0] == 0
+        # enforcement restored for normal operation
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_parent_table_rebuild_preserves_fk_children(tmp_path: Path, db_path: Path):
+    """A migration may DROP+recreate a table that other tables reference by FK
+    (the raw_events source-CHECK removal in 0006), and the children still
+    resolve afterwards.
+    """
+    mdir = tmp_path / "migrations"
+    mdir.mkdir()
+    (mdir / "0001_base.sql").write_text(
+        "CREATE TABLE parent (id TEXT PRIMARY KEY, v TEXT NOT NULL CHECK (v IN ('a','b')));\n"
+        "CREATE TABLE child (id TEXT PRIMARY KEY, pref TEXT REFERENCES parent(id));\n"
+    )
+    # rebuild parent to drop its CHECK, preserving rows
+    (mdir / "0002_widen.sql").write_text(
+        "CREATE TABLE parent_new (id TEXT PRIMARY KEY, v TEXT NOT NULL);\n"
+        "INSERT INTO parent_new (id, v) SELECT id, v FROM parent;\n"
+        "DROP TABLE parent;\n"
+        "ALTER TABLE parent_new RENAME TO parent;\n"
+    )
+    conn = db.connect(db_path)
+    try:
+        db.migrate(conn, mdir)  # applies both in order
+        conn.execute("INSERT INTO parent (id, v) VALUES ('p1', 'a')")
+        conn.execute("INSERT INTO child (id, pref) VALUES ('c1', 'p1')")
+        conn.commit()
+        # CHECK is gone: a formerly-illegal value now inserts
+        conn.execute("INSERT INTO parent (id, v) VALUES ('p2', 'anything')")
+        conn.commit()
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        joined = conn.execute(
+            "SELECT COUNT(*) FROM child c JOIN parent p ON c.pref = p.id"
+        ).fetchone()[0]
+        assert joined == 1
     finally:
         conn.close()
 

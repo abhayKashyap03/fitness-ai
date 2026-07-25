@@ -7,21 +7,92 @@
 
 ## Where the code stands (verified)
 
-- Phases 0–3 complete. WHOOP vertical slice works **live**. **Phase 5 (Apple
-  Health, WEIGHT) complete**; **Phase 4 pre-work merged** (tool contract,
-  guardrails, grounding harness). 145 tests green; ruff + mypy clean.
-- Schema at **v5** (…0004 utc_offset, **0005 source_app** — D3/ADR-0008: adds
-  `source_app` + `utc_offset` to weight/food, recreates resolver views; raw
-  untouched).
-- **PR #5 + #6 + #7 MERGED — all on `main`.** #5/#6 = Phase 5 WEIGHT (T5.0–T5.8 +
-  D3). #7 = Phase 4 pre-work: T4.1 tool contract (`coach/tools.py`), §8.6
-  guardrails (`compute/guardrails.py`), T4.2 grounding harness authored
-  (`coach/grounding.py`; live-model eval gated on Anthropic SDK + API key).
-- CLI: `coach db init|status`, `auth whoop`, `ingest whoop`,
-  **`ingest healthkit --file`**, `normalize [--rebuild]`, `status --date`, `tdee`.
+- Phases 0–5 complete + Phase 4 coach (`ask`) merged. WHOOP slice works **live**.
+  MFP food+weight adapter built, diary shape **live-reconciled**; awaiting live
+  end-to-end run. **230 tests green; ruff + mypy clean.**
+- Schema at **v7** (0006 myfitnesspal food — drops `raw_events.source` CHECK
+  entirely §2.5, widens `food_entry.source`; **0007 myfitnesspal weight** —
+  widens `weight_measurement.source`, ranks MFP below manual). D4/ADR-0009.
+- **`raw_events` rebuild landed WITH sign-off (§8.5)** — row-preserving; proven
+  with FK-linked data (row counts preserved, integrity ok, 0 FK violations).
+  Migration runner now hosts SQLite's 12-step: FK off during a migration, whole-DB
+  `foreign_key_check` before COMMIT (stronger than per-statement enforcement).
+- CLI: `coach db init|status|backup|verify`, `auth whoop`, `ingest whoop`,
+  `ingest healthkit --file`, **`ingest mfp [--since --until]`**, `normalize
+  [--rebuild]`, `status`, `tdee`, `ask`, `eval grounding`, `doctor`, `sync`.
 - **GateGuard disabled** via `.claude/settings.local.json` (`ECC_GATEGUARD=off`)
   — **user-authorized 2026-07-19; do NOT re-flag** the §8.2 tension. File stays
   untracked (machine-local).
+- **Open item (unchanged):** `~/.zshrc` plaintext API keys flagged, unrotated —
+  user's call, do not act.
+
+---
+
+## Session 2026-07-24 (b) — MFP live reconciliation + weight + WHOOP fixes (branch `feat/mfp-adapter`)
+
+Follow-up to the same-day MFP adapter build, driven by the user's live testing.
+
+- **MFP diary param fixed:** `date` → **`entry_date`** (user caught it live — an
+  unknown param makes MFP silently return TODAY). `/v2/diary`.
+- **MFP diary shape LIVE-RECONCILED** against a real payload: entries are
+  per-MEAL aggregates (`type:'diary_meal'`, meal in `diary_meal`, summed
+  `nutritional_contents`), NOT per-item. The `items` list also carries non-food
+  `exercise_entry`/`steps_aggregate` — normalizer now **filters to diary_meal**
+  (folding those in would fabricate calories). Fixture replaced with a
+  structurally-real one (synthetic macro values).
+- **MFP weight added** (user's call: get weight from MFP, not WHOOP):
+  `GET /v2/measurements?type=weight&entry_date=…` → `{item:{value,unit,date,
+  updated_at}}`. `client.get_weight`, ingest pulls diary+weight per day
+  (`record_type` `diary`+`measurement`), `parse_measurement` (lb/kg/stone→kg;
+  day_key exact; measured_at NULL — MFP gives a day not an instant). **Migration
+  0007** widens `weight_measurement.source` + ranks `myfitnesspal` BELOW manual
+  (user-typed; a real scale always wins). Proven on FK-linked data.
+- **WHOOP ingest bug-fixes** (user's edits were broken by a wrong "collection"
+  assumption): `client.get_body_measurement` reverted to return the single dict
+  (`list()` was keeping the KEYS, dropping the numbers); removed the crashing +
+  duplicate `plan` line. Body measurement is a single dateless object — stays
+  raw-only, NOT normalized (dateless static value would corrupt the EWMA trend).
+- Removed the user's debug `print` in `ingest.py` during the weight restructure.
+
+**Verified:** 230 green, ruff + mypy clean; migrations 0006+0007 proven on
+FK-linked data; schema now **v7**. **Next:** live `coach ingest mfp` end-to-end
+(diary + weight) once usage resets; watch the first real weight payload (the
+`item` vs `items` shape — normalizer tolerates both).
+
+---
+
+## Session 2026-07-24 (a) — MyFitnessPal direct adapter (branch `feat/mfp-adapter`)
+
+User wanted off the daily manual-export treadmill (Apple Health / MFP CSV) and
+asked about `python-myfitnesspal` / `myfitnesspal-mcp-python`. Recon: both hit
+MFP's **private** API (HTML scrape and/or internal v2 JSON) with the browser
+session — the path §12 banned. Laid out the trade-off; **user signed off to
+override §12** for their own account (ADR-0010) and to **drop the
+`raw_events.source` CHECK entirely** rather than extend it (ADR-0009).
+
+Built (stdlib + httpx, **zero new deps**; mirrors WHOOP adapter):
+- `adapters/myfitnesspal/`: `auth.py` (cookie → bearer, cached 0600, refresh),
+  `client.py` (injectable transport, bounded retry, no token/cookie leak),
+  `ingest.py` (one raw event per diary day, idempotent, edit → sibling).
+- `normalize/myfitnesspal.py`: pure `raw → FoodEntryRow[]`; MFP date = local
+  `day_key`; absence stays NULL; empty diary = no rows (not a fast). Runner clears
+  + rebuilds the MFP slice each run so edited-away items don't orphan.
+- `store/canonical.py`: `upsert_food` + `food_id`; food folded into the rebuild
+  fingerprint. Migration **0006** (raw_events CHECK drop + food_entry widen +
+  view precedence). Runner hardened for parent-table rebuilds (see above).
+- Config `MFP_SESSION_COOKIE` + `require_mfp()`; `.env.example`; CLI `ingest mfp`.
+- Tests: `test_mfp_normalize`, `test_mfp_adapter`, `test_mfp_pipeline`, + 2 runner
+  guard tests (dangling-FK rollback; parent rebuild preserves children).
+
+**Verified:** 223 green, ruff + mypy clean; migration proven on FK-linked data in
+a scratchpad; CLI smoke (db init → v6, ingest mfp clean-errors without a cookie,
+doctor lists myfitnesspal). **NOT verified:** live MFP call — the v2 diary READ
+path + field names are reconstructed and **reconcile on first live contact**
+(§10.2), isolated to the adapter + fixture.
+
+**Next (human):** log in at myfitnesspal.com, paste the Cookie header into
+`.env` as `MFP_SESSION_COOKIE`, run `coach ingest mfp --since <date>` →
+`coach normalize` → `coach status`. Expect a first-contact field reconciliation.
 
 ---
 
