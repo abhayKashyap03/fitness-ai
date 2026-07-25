@@ -419,7 +419,9 @@ def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
     conn = db.connect(settings.db_path)
     try:
         _ensure_migrated(conn)
-        result = ask(conn, provider, args.question, user_id=settings.user_id)
+        result = ask(
+            conn, provider, args.question, user_id=settings.user_id, today=_today(settings)
+        )
     except ApiError as exc:
         print(f"API error: {exc}", file=sys.stderr)
         return 1

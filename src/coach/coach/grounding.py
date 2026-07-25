@@ -176,7 +176,9 @@ def run_live_grounding(provider) -> list[dict]:
         try:
             _db.migrate(conn)
             sc.seed(conn)
-            res = ask(conn, provider, sc.query)
+            # scenarios pin their day in the query; anchor "today" just after it
+            # so relative phrasing can never wander into empty history
+            res = ask(conn, provider, sc.query, today="2026-05-02")
         finally:
             conn.close()
         fabrications = fabricated_numbers(res.text, sc.allowed_numbers)

@@ -1,11 +1,15 @@
 {
-  "_synthetic": "SYNTHETIC fixture — hand-authored, NOT a real MFP response. Shape from myfitnesspalapi.com /measurements docs; reconcile against a live read (§6.2, §10.2).",
-  "item": {
-    "id": "s09feu438vfn3kgh",
-    "type": "weight",
-    "value": 183.5,
-    "unit": "pounds",
-    "date": "2026-06-15",
-    "updated_at": "2026-06-15T08:30:05-04:00"
-  }
+  "_synthetic": "STRUCTURALLY REAL — mirrors a live api.myfitnesspal.com/v2/measurements response (items LIST, type 'Weight' capital-W, has_more/total_entries envelope). Values + id fabricated. §6.2/§10.2.",
+  "has_more": false,
+  "total_entries": 1,
+  "items": [
+    {
+      "date": "2026-06-15",
+      "id": "SCRUBBED-measurement-id",
+      "type": "Weight",
+      "unit": "pounds",
+      "updated_at": "2026-06-15T12:30:05Z",
+      "value": 183.5
+    }
+  ]
 }

@@ -59,6 +59,22 @@ def test_dispatch_routes_to_handler(seeded_conn):
     assert out["series"]  # non-empty
 
 
+def test_dispatch_fills_today_when_day_anchor_omitted(seeded_conn):
+    # the model has no clock — an omitted end/date gets the server-side today
+    out = tools.dispatch(seeded_conn, "get_weight_trend", {"window": 7}, today=WEIGH_DAY)
+    assert out["end"] == WEIGH_DAY
+    assert out["series"]
+    out = tools.dispatch(seeded_conn, "get_daily_status", {}, today=WEIGH_DAY)
+    assert out["day_key"] == WEIGH_DAY
+
+
+def test_dispatch_model_supplied_date_wins_over_today(seeded_conn):
+    out = tools.dispatch(
+        seeded_conn, "get_weight_trend", {"end": "2000-01-01"}, today=WEIGH_DAY
+    )
+    assert out["end"] == "2000-01-01"  # explicit model arg is respected
+
+
 # ---- every tool returns JSON-serializable structured data ------------------
 
 

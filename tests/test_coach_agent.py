@@ -306,6 +306,22 @@ def test_ask_tool_round_executes_and_feeds_back(seeded_conn, script):
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)
+def test_ask_today_reaches_system_prompt_and_fills_omitted_dates(seeded_conn, script):
+    # the model has no clock (a live Gemini run guessed 2023): the caller's
+    # `today` must land in the system prompt AND fill an omitted end/date
+    tr = FakeTransport(
+        [script.tool("get_weight_trend", {"window": 7}), script.text("ok")]
+    )
+    res = ask(seeded_conn, script.build(tr), "how's my weight?", today=WEIGH_DAY)
+    assert res.text == "ok"
+    assert WEIGH_DAY in json.dumps(tr.requests[0])  # date visible to the model
+    # tool ran against today's anchor, not a crash on missing `end`
+    assert res.tool_calls[0].ok
+    sent = json.dumps(tr.requests[1])
+    assert WEIGH_DAY in sent  # tool result window anchored on today
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)
 def test_ask_unknown_tool_is_error_not_crash(seeded_conn, script):
     tr = FakeTransport([script.tool("get_everything", {}), script.text("No such tool.")])
     res = ask(seeded_conn, script.build(tr), "?")

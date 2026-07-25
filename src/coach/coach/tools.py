@@ -192,7 +192,10 @@ def get_safety_flags(
 
 # ---- registry --------------------------------------------------------------
 
-_DAY = {"type": "string", "description": "day_key in YYYY-MM-DD"}
+_DAY = {
+    "type": "string",
+    "description": "day_key in YYYY-MM-DD; OMIT for today (the server fills the real current date)",
+}
 _WINDOW = {"type": "integer", "description": "number of days", "minimum": 1}
 
 TOOLS: list[ToolSpec] = [
@@ -206,7 +209,6 @@ TOOLS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {"date": _DAY},
-            "required": ["date"],
         },
         handler=get_daily_status,
     ),
@@ -219,7 +221,6 @@ TOOLS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {"end": _DAY, "window": _WINDOW},
-            "required": ["end"],
         },
         handler=get_weight_trend,
     ),
@@ -232,7 +233,6 @@ TOOLS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {"end": _DAY, "window": _WINDOW},
-            "required": ["end"],
         },
         handler=get_recovery_history,
     ),
@@ -246,7 +246,6 @@ TOOLS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {"end": _DAY, "window": _WINDOW},
-            "required": ["end"],
         },
         handler=get_tdee_estimate,
     ),
@@ -260,13 +259,16 @@ TOOLS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {"end": _DAY, "window": _WINDOW},
-            "required": ["end"],
         },
         handler=get_safety_flags,
     ),
 ]
 
 _BY_NAME = {t.name: t for t in TOOLS}
+
+# per-tool name of its day anchor (filled with the server-side "today" when the
+# model omits it — the model must never have to guess the current date, §2.2)
+_DAY_ARG = {t.name: ("date" if t.name == "get_daily_status" else "end") for t in TOOLS}
 
 
 def tool_specs() -> list[LLMToolSpec]:
@@ -282,10 +284,23 @@ def tool_specs() -> list[LLMToolSpec]:
 
 
 def dispatch(
-    conn: sqlite3.Connection, name: str, args: dict, *, user_id: int = 1
+    conn: sqlite3.Connection,
+    name: str,
+    args: dict,
+    *,
+    user_id: int = 1,
+    today: str | None = None,
 ) -> dict:
-    """Run a tool by name with model-supplied ``args``. Raises on unknown tool."""
+    """Run a tool by name with model-supplied ``args``. Raises on unknown tool.
+
+    When ``today`` is given and the model omitted the tool's day anchor
+    (``end``/``date``), the REAL current day_key is filled in server-side — the
+    model has no reliable clock and must never guess dates (§2.2).
+    """
     spec = _BY_NAME.get(name)
     if spec is None:
         raise KeyError(f"unknown tool: {name!r}")
+    day_arg = _DAY_ARG[name]
+    if today is not None and not args.get(day_arg):
+        args = {**args, day_arg: today}
     return spec.handler(conn, user_id=user_id, **args)
