@@ -538,12 +538,19 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
 
 
 def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
-    """One-shot: incremental WHOOP ingest + HealthKit (if export present) + normalize.
+    """One-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize.
 
     Lowest-friction path to current data (risk #8: logging/sync friction kills
     the tool). Skips sources that aren't configured instead of failing.
+    HealthKit is NOT part of the daily path anymore (MFP supplies daily food and
+    weight); an Apple Health export is an occasional backfill, run only when
+    ``--hk-file`` is passed explicitly.
     """
-    from ..adapters.healthkit.ingest import ingest_healthkit
+    from datetime import date as _date
+
+    from ..adapters.myfitnesspal.auth import MfpAuthError
+    from ..adapters.myfitnesspal.ingest import auto_since as mfp_auto_since
+    from ..adapters.myfitnesspal.ingest import ingest_mfp
     from ..adapters.whoop.ingest import auto_since
     from ..normalize.runner import normalize_all as _normalize
 
@@ -568,13 +575,36 @@ def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
         except ReauthRequired as exc:
             print(f"  whoop: auth needed ({exc}) — skipped", file=sys.stderr)
 
-        # HealthKit (only if an export file is present)
-        export = Path(args.hk_file) if args.hk_file else Path("apple_health_export/export.xml")
-        if export.exists():
-            res = ingest_healthkit(conn, export, user_id=settings.user_id)
-            print(f"  healthkit: inserted={res['inserted']} skipped={res['skipped']}")
-        else:
-            print("  healthkit: no export file — skipped")
+        # MyFitnessPal food + weight (skip cleanly when unconfigured)
+        try:
+            settings.require_mfp()
+            m_since = mfp_auto_since(conn)
+            if m_since is None:
+                print("  mfp: no prior ingest — run `coach ingest mfp --since <date>` once first")
+            else:
+                until = _date.fromisoformat(_today(settings)).isoformat()
+                print(f"  mfp: incremental since {m_since}")
+                res = ingest_mfp(
+                    conn, _mfp_client(settings), since=m_since, until=until, user_id=settings.user_id
+                )
+                d, w = res["diary"], res["weight"]
+                print(f"    diary   inserted={d['inserted']:4d} skipped={d['skipped']:4d}")
+                print(f"    weight  inserted={w['inserted']:4d} skipped={w['skipped']:4d}")
+        except ConfigError:
+            print("  mfp: not configured — skipped")
+        except MfpAuthError as exc:
+            print(f"  mfp: auth needed ({exc}) — skipped", file=sys.stderr)
+
+        # HealthKit backfill — ONLY when an export path is passed explicitly
+        if args.hk_file:
+            from ..adapters.healthkit.ingest import ingest_healthkit
+
+            export = Path(args.hk_file)
+            if export.exists():
+                res_hk = ingest_healthkit(conn, export, user_id=settings.user_id)
+                print(f"  healthkit: inserted={res_hk['inserted']} skipped={res_hk['skipped']}")
+            else:
+                print(f"  healthkit: export not found: {export}", file=sys.stderr)
 
         counts = _normalize(conn, user_id=settings.user_id)
         print("  normalize:", "  ".join(f"{k}={v}" for k, v in counts.items()))
@@ -616,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_iw.set_defaults(func=_cmd_ingest_whoop)
 
     p_ih = ingest_sub.add_parser(
-        "healthkit", help="ingest Apple Health body/weight from an export (.xml/.zip)"
+        "healthkit", help="occasional backfill: Apple Health body/weight from an export (.xml/.zip)"
     )
     p_ih.add_argument("--file", required=True, help="path to export.xml or export.zip")
     p_ih.set_defaults(func=_cmd_ingest_healthkit)
@@ -671,10 +701,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor.set_defaults(func=_cmd_doctor)
 
     p_sync = sub.add_parser(
-        "sync", help="one-shot: incremental WHOOP + HealthKit (if present) + normalize"
+        "sync", help="one-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize"
     )
     p_sync.add_argument(
-        "--hk-file", default=None, help="Apple Health export path (default: apple_health_export/export.xml)"
+        "--hk-file", default=None,
+        help="ALSO ingest an Apple Health export (occasional weight backfill; not part of the daily path)",
     )
     p_sync.set_defaults(func=_cmd_sync)
 
