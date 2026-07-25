@@ -44,6 +44,45 @@ def ewma_series(values: list[float], alpha: float = 0.1) -> list[float]:
     return out
 
 
+def gap_aware_ewma(
+    points: list[tuple[str, float]], alpha: float = 0.1
+) -> list[tuple[str, float]]:
+    """EWMA over irregularly-sampled daily points (``[(day_key, value), ...]``).
+
+    Row-based EWMA treats a weigh-in after a 14-day travel gap exactly like one
+    after a single day — the stale trend keeps 90% of its weight and the trend
+    lags reality for weeks (risk #3: async/partial data). Fix: scale the
+    smoothing to the calendar, not the row count. For a gap of ``g`` days the
+    effective alpha is ``1 - (1-alpha)^g`` — algebraically identical to running
+    the daily EWMA ``g`` times toward the new observation, so evenly-sampled
+    data is completely unchanged (g=1 -> plain alpha) and a long gap lets the
+    new reading pull harder exactly as if the days had passed one at a time.
+
+    Points must be sorted ascending by day_key with no duplicate days (the
+    resolver view guarantees one row per day). Missing days are NOT
+    interpolated — absence stays absence (§2.7); only the decay accounts for
+    elapsed time.
+    """
+    if not 0 < alpha <= 1:
+        raise ValueError(f"alpha must be in (0, 1], got {alpha}")
+    if not points:
+        return []
+    from datetime import date
+
+    out = [points[0]]
+    prev_day, prev_trend = date.fromisoformat(points[0][0]), points[0][1]
+    for day_key, value in points[1:]:
+        day = date.fromisoformat(day_key)
+        gap = (day - prev_day).days
+        if gap <= 0:
+            raise ValueError(f"points must be strictly ascending by day; got {day_key} after {prev_day}")
+        eff = 1 - (1 - alpha) ** gap
+        prev_trend = eff * value + (1 - eff) * prev_trend
+        out.append((day_key, prev_trend))
+        prev_day = day
+    return out
+
+
 def latest_ewma(values: list[float], alpha: float = 0.1) -> float | Insufficient:
     if not values:
         return Insufficient(have=0, needed=1)
