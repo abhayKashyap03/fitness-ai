@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from ..store.canonical import upsert_food, upsert_recovery, upsert_weight, upsert_workout
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
 from .healthkit import parse_body_record
-from .myfitnesspal import parse_diary
+from .myfitnesspal import parse_diary, parse_measurement
 from .whoop import parse_recovery, parse_workout
 
 
@@ -101,6 +101,7 @@ def normalize_all(
 
     n_wt, n_wt_skipped = _normalize_healthkit_weight(conn, user_id, derived_at)
     n_food = _normalize_mfp_food(conn, user_id, derived_at)
+    n_mfp_wt = _normalize_mfp_weight(conn, user_id, derived_at)
 
     n_groups = _regroup_workouts(conn, tolerance_s)
     conn.commit()
@@ -109,6 +110,7 @@ def normalize_all(
         "workout": n_wk,
         "weight": n_wt,
         "weight_skipped": n_wt_skipped,
+        "mfp_weight": n_mfp_wt,
         "food": n_food,
         "workout_groups": n_groups,
     }
@@ -178,6 +180,39 @@ def _normalize_mfp_food(conn: sqlite3.Connection, user_id: int, derived_at: str)
         for row in parse_diary(record, user_id=user_id):
             upsert_food(conn, row, raw_ref=r["id"], derived_at=derived_at)
             n += 1
+    return n
+
+
+def _normalize_mfp_weight(conn: sqlite3.Connection, user_id: int, derived_at: str) -> int:
+    """Derive weight_measurement rows from raw MFP weight measurements.
+
+    One weigh-in per day (external_id ``mfp:measurement:weight:<day>``); an
+    edited day yields a sibling raw row, newest ingest wins (rowid tiebreak, as
+    for food). Deterministic weight_id (1:1 raw_ref) means re-normalize
+    overwrites in place — no stale rows to clear. source='myfitnesspal'.
+    """
+    newest: dict[str, sqlite3.Row] = {}
+    for r in conn.execute(
+        "SELECT id, external_id, payload FROM raw_events "
+        "WHERE source='myfitnesspal' AND record_type='measurement' "
+        "ORDER BY ingested_at, rowid"
+    ).fetchall():
+        newest[str(r["external_id"])] = r
+
+    n = 0
+    for r in newest.values():
+        partial = parse_measurement(json.loads(r["payload"]), user_id=user_id)
+        if partial is None:
+            continue
+        upsert_weight(
+            conn,
+            partial,
+            source="myfitnesspal",
+            raw_ref=r["id"],
+            external_id=r["external_id"],
+            derived_at=derived_at,
+        )
+        n += 1
     return n
 
 

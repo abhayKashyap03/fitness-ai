@@ -265,10 +265,10 @@ def _cmd_ingest_mfp(settings: Settings, args: argparse.Namespace) -> int:
         return 1
     finally:
         conn.close()
-    print(
-        f"  myfitnesspal (diary) inserted={result['inserted']:4d} "
-        f"skipped={result['skipped']:4d} days={result['days']:4d}"
-    )
+    d, w = result["diary"], result["weight"]
+    print(f"  myfitnesspal  days={result['days']:4d}")
+    print(f"    diary   inserted={d['inserted']:4d} skipped={d['skipped']:4d}")
+    print(f"    weight  inserted={w['inserted']:4d} skipped={w['skipped']:4d}")
     return 0
 
 

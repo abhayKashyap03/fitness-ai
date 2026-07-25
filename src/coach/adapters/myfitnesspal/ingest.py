@@ -11,11 +11,18 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, timedelta
+from typing import TypedDict
 
 from ...store.raw import insert_raw_event
 from .client import MfpClient
 
 SOURCE = "myfitnesspal"
+
+
+class MfpIngestResult(TypedDict):
+    diary: dict[str, int]
+    weight: dict[str, int]
+    days: int
 
 
 def _day_range(since: str, until: str) -> list[str]:
@@ -57,27 +64,49 @@ def ingest_mfp(
     since: str,
     until: str,
     user_id: int = 1,
-) -> dict[str, int]:
-    """Ingest MFP diary days in ``[since, until]`` (inclusive, ``YYYY-MM-DD``).
+) -> MfpIngestResult:
+    """Ingest MFP diary + weight for ``[since, until]`` (inclusive, ``YYYY-MM-DD``).
 
-    Returns ``{"inserted": n, "skipped": n, "days": n}``.
+    One raw event per day per kind: ``record_type='diary'`` (food) and
+    ``record_type='measurement'`` (weight). Append-only + idempotent; an edited
+    day writes a new sibling row resolved by newest ingest. Returns
+    ``{"diary": {inserted, skipped}, "weight": {inserted, skipped}, "days": n}``.
     """
-    inserted = skipped = 0
+    diary_ins = diary_skip = wt_ins = wt_skip = 0
     days = _day_range(since, until)
     for day in days:
-        payload = client.get_diary(day)
-        # Stamp the day onto the stored payload so the normalizer never has to
-        # re-derive it from the (reconciliation-risk) inner fields.
-        record = {"date": day, "diary": payload}
-        _, was_new = insert_raw_event(
+        # --- food diary ---
+        diary = client.get_diary(day)
+        _, new = insert_raw_event(
             conn,
             source=SOURCE,
             record_type="diary",
-            payload=record,
+            # stamp the day so the normalizer never re-derives it from the
+            # (reconciliation-risk) inner fields
+            payload={"date": day, "diary": diary},
             external_id=f"mfp:diary:{day}",
             recorded_at=day,
             user_id=user_id,
         )
-        inserted += int(was_new)
-        skipped += int(not was_new)
-    return {"inserted": inserted, "skipped": skipped, "days": len(days)}
+        diary_ins += int(new)
+        diary_skip += int(not new)
+
+        # --- weight measurement ---
+        weight = client.get_weight(day)
+        _, new = insert_raw_event(
+            conn,
+            source=SOURCE,
+            record_type="measurement",
+            payload={"date": day, "measurement": weight},
+            external_id=f"mfp:measurement:weight:{day}",
+            recorded_at=day,
+            user_id=user_id,
+        )
+        wt_ins += int(new)
+        wt_skip += int(not new)
+
+    return {
+        "diary": {"inserted": diary_ins, "skipped": diary_skip},
+        "weight": {"inserted": wt_ins, "skipped": wt_skip},
+        "days": len(days),
+    }

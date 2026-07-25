@@ -100,14 +100,16 @@ def test_diary_request_carries_auth_and_user_headers():
         seen["auth"] = req.headers.get("Authorization")
         seen["uid"] = req.headers.get("mfp-user-id")
         seen["cid"] = req.headers.get("mfp-client-id")
-        seen["date"] = req.url.params.get("date")
+        # MFP's v2 diary keys the day off `entry_date`; an unknown/`date` param
+        # is ignored and the API silently returns TODAY (live-confirmed).
+        seen["entry_date"] = req.url.params.get("entry_date")
         return httpx.Response(200, json={"items": []})
 
     _client(handler).get_diary("2026-06-15")
     assert seen["auth"] == "Bearer AT"
     assert seen["uid"] == "42"
     assert seen["cid"] == "mfp-main-js"
-    assert seen["date"] == "2026-06-15"
+    assert seen["entry_date"] == "2026-06-15"
 
 
 def test_client_retries_on_429_then_succeeds():

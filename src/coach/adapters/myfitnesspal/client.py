@@ -14,7 +14,7 @@ from collections.abc import Callable
 
 import httpx
 
-from . import API_BASE, CLIENT_ID, DIARY_PATH
+from . import API_BASE, CLIENT_ID, DIARY_PATH, MEASUREMENTS_PATH
 
 log = logging.getLogger("coach.mfp.client")
 
@@ -104,4 +104,13 @@ class MfpClient:
         RECONCILES ON FIRST LIVE CONTACT (§10.2, see ``__init__``). Returns the
         JSON verbatim; the normalizer owns field extraction.
         """
-        return self._get(DIARY_PATH, {"date": day})
+        return self._get(DIARY_PATH, {"entry_date": day})
+
+    def get_weight(self, day: str) -> dict:
+        """Return one day's raw weight measurement (``YYYY-MM-DD``).
+
+        MFP keys this off ``entry_date`` and this adapter only requests
+        ``type=weight``. Returns the JSON verbatim; the normalizer owns field
+        extraction (value/unit/date/updated_at).
+        """
+        return self._get(MEASUREMENTS_PATH, {"type": "weight", "entry_date": day})

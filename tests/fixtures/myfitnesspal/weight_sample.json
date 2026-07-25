@@ -1,0 +1,11 @@
+{
+  "_synthetic": "SYNTHETIC fixture — hand-authored, NOT a real MFP response. Shape from myfitnesspalapi.com /measurements docs; reconcile against a live read (§6.2, §10.2).",
+  "item": {
+    "id": "s09feu438vfn3kgh",
+    "type": "weight",
+    "value": 183.5,
+    "unit": "pounds",
+    "date": "2026-06-15",
+    "updated_at": "2026-06-15T08:30:05-04:00"
+  }
+}

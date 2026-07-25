@@ -19,7 +19,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .healthkit import WeightPartial
+
 KJ_PER_KCAL = 4.184
+
+# MFP reports weight units as full words. Map to kg.
+_MASS_TO_KG = {
+    "pounds": 0.45359237,
+    "pound": 0.45359237,
+    "lb": 0.45359237,
+    "lbs": 0.45359237,
+    "kilograms": 1.0,
+    "kilogram": 1.0,
+    "kg": 1.0,
+    "stones": 6.35029318,
+    "stone": 6.35029318,
+    "st": 6.35029318,
+}
 
 
 @dataclass(frozen=True)
@@ -85,8 +101,67 @@ def _macro(nutrition: dict, *keys: str) -> float | None:
     return None
 
 
+def _weight_kg(value: float, unit: str | None) -> float | None:
+    """Convert an MFP weight value to kg, or None on an unknown unit (§2.7)."""
+    factor = _MASS_TO_KG.get((unit or "").strip().lower())
+    if factor is None:
+        return None
+    return round(value * factor, 4)
+
+
+def parse_measurement(record: dict, *, user_id: int = 1) -> WeightPartial | None:
+    """Raw MFP weight measurement -> WeightPartial, or None if unusable.
+
+    Record shape: ``{"date": "YYYY-MM-DD", "measurement": {"item": {...}}}``.
+    Tolerates ``item`` (single) or ``items`` (list; first weight wins). MFP gives
+    only a logged DAY, not a weigh-in instant, so ``measured_at``/``utc_offset``
+    stay NULL (§2.7 — no false precision); the stamped ``date`` is the exact
+    local ``day_key``. ``updated_at`` is edit metadata, deliberately not used as
+    a measurement time.
+    """
+    day = record.get("date")
+    if not day:
+        return None
+    payload = record.get("measurement") or {}
+    item = payload.get("item")
+    if item is None:
+        items = payload.get("items")
+        item = next((it for it in items if isinstance(it, dict)), None) if isinstance(items, list) else None
+    if not isinstance(item, dict):
+        return None
+    if str(item.get("type", "weight")).strip().lower() != "weight":
+        return None
+
+    value = _num(item.get("value"))
+    if value is None:
+        return None
+    weight_kg = _weight_kg(value, item.get("unit"))
+    if weight_kg is None:
+        return None
+
+    return WeightPartial(
+        user_id=user_id,
+        source_app=None,  # MFP is single-writer for its own API
+        day_key=str(day),
+        measured_at=None,  # MFP gives a day, not an instant (§2.7)
+        tz_name=None,
+        utc_offset=None,
+        weight_kg=weight_kg,
+        body_fat_pct=None,
+        lean_mass_kg=None,
+    )
+
+
 def parse_diary(record: dict, *, user_id: int = 1) -> list[FoodEntryRow]:
-    """Raw MFP diary record -> list of FoodEntryRow (one per logged item)."""
+    """Raw MFP diary record -> one FoodEntryRow per logged MEAL.
+
+    LIVE-RECONCILED against a real payload: MFP returns per-MEAL aggregates
+    (``type='diary_meal'``, meal name in ``diary_meal``, summed macros in
+    ``nutritional_contents``) — NOT per food item. The same ``items`` list also
+    carries ``exercise_entry`` / ``steps_aggregate`` rows, which are NOT food and
+    are skipped (folding them in would fabricate calories). The ``food_daily``
+    view SUMs the meal rows into the day total.
+    """
     day = record.get("date")
     if not day:
         return []
@@ -97,16 +172,12 @@ def parse_diary(record: dict, *, user_id: int = 1) -> list[FoodEntryRow]:
 
     rows: list[FoodEntryRow] = []
     for i, item in enumerate(items):
-        if not isinstance(item, dict):
-            continue
-        nutrition = item.get("nutritional_contents") or item.get("nutrition") or {}
-        food = item.get("food") or {}
-        description = item.get("description") or food.get("description") or food.get("name")
-        serving = item.get("serving_size") or {}
-
-        ext = item.get("id")
-        # stable positional fallback keeps rebuild deterministic if id is absent
-        external_id = str(ext) if ext is not None else f"{day}:{i}"
+        if not isinstance(item, dict) or item.get("type") != "diary_meal":
+            continue  # skip exercise_entry, steps_aggregate, anything non-food
+        nutrition = item.get("nutritional_contents") or {}
+        meal = item.get("diary_meal")
+        # one meal per day -> stable id from (day, meal); positional fallback
+        external_id = f"{day}:{meal}" if meal else f"{day}:{i}"
 
         rows.append(
             FoodEntryRow(
@@ -115,13 +186,13 @@ def parse_diary(record: dict, *, user_id: int = 1) -> list[FoodEntryRow]:
                 source="myfitnesspal",
                 source_app=None,  # MFP is single-writer for its own API
                 external_id=external_id,
-                entry_type="item",
-                consumed_at=None,  # MFP diary carries no per-item timestamp
+                entry_type="item",  # a meal's rollup; SUMs to the day total
+                consumed_at=None,  # per-meal aggregate carries no timestamp
                 tz_name=None,
                 utc_offset=None,
-                description=description,
-                quantity=_num(item.get("servings") if "servings" in item else serving.get("value")),
-                unit=serving.get("unit"),
+                description=meal,  # meal name is the only label MFP gives here
+                quantity=None,  # per-meal aggregate has no serving size
+                unit=None,
                 kcal=_energy_kcal(nutrition.get("energy", nutrition.get("calories"))),
                 protein_g=_macro(nutrition, "protein"),
                 carbs_g=_macro(nutrition, "carbohydrates", "carbs"),

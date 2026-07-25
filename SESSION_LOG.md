@@ -8,11 +8,11 @@
 ## Where the code stands (verified)
 
 - Phases 0–5 complete + Phase 4 coach (`ask`) merged. WHOOP slice works **live**.
-  MFP food adapter built (offline-tested, awaiting live cookie). **223 tests
-  green; ruff + mypy clean.**
-- Schema at **v6** (0005 source_app; **0006 myfitnesspal** — D4/ADR-0009: drops
-  the `raw_events.source` CHECK entirely (§2.5), widens `food_entry.source` to
-  add `myfitnesspal`, recreates food views with direct-MFP precedence).
+  MFP food+weight adapter built, diary shape **live-reconciled**; awaiting live
+  end-to-end run. **230 tests green; ruff + mypy clean.**
+- Schema at **v7** (0006 myfitnesspal food — drops `raw_events.source` CHECK
+  entirely §2.5, widens `food_entry.source`; **0007 myfitnesspal weight** —
+  widens `weight_measurement.source`, ranks MFP below manual). D4/ADR-0009.
 - **`raw_events` rebuild landed WITH sign-off (§8.5)** — row-preserving; proven
   with FK-linked data (row counts preserved, integrity ok, 0 FK violations).
   Migration runner now hosts SQLite's 12-step: FK off during a migration, whole-DB
@@ -28,7 +28,40 @@
 
 ---
 
-## Session 2026-07-24 — MyFitnessPal direct adapter (branch `feat/mfp-adapter`)
+## Session 2026-07-24 (b) — MFP live reconciliation + weight + WHOOP fixes (branch `feat/mfp-adapter`)
+
+Follow-up to the same-day MFP adapter build, driven by the user's live testing.
+
+- **MFP diary param fixed:** `date` → **`entry_date`** (user caught it live — an
+  unknown param makes MFP silently return TODAY). `/v2/diary`.
+- **MFP diary shape LIVE-RECONCILED** against a real payload: entries are
+  per-MEAL aggregates (`type:'diary_meal'`, meal in `diary_meal`, summed
+  `nutritional_contents`), NOT per-item. The `items` list also carries non-food
+  `exercise_entry`/`steps_aggregate` — normalizer now **filters to diary_meal**
+  (folding those in would fabricate calories). Fixture replaced with a
+  structurally-real one (synthetic macro values).
+- **MFP weight added** (user's call: get weight from MFP, not WHOOP):
+  `GET /v2/measurements?type=weight&entry_date=…` → `{item:{value,unit,date,
+  updated_at}}`. `client.get_weight`, ingest pulls diary+weight per day
+  (`record_type` `diary`+`measurement`), `parse_measurement` (lb/kg/stone→kg;
+  day_key exact; measured_at NULL — MFP gives a day not an instant). **Migration
+  0007** widens `weight_measurement.source` + ranks `myfitnesspal` BELOW manual
+  (user-typed; a real scale always wins). Proven on FK-linked data.
+- **WHOOP ingest bug-fixes** (user's edits were broken by a wrong "collection"
+  assumption): `client.get_body_measurement` reverted to return the single dict
+  (`list()` was keeping the KEYS, dropping the numbers); removed the crashing +
+  duplicate `plan` line. Body measurement is a single dateless object — stays
+  raw-only, NOT normalized (dateless static value would corrupt the EWMA trend).
+- Removed the user's debug `print` in `ingest.py` during the weight restructure.
+
+**Verified:** 230 green, ruff + mypy clean; migrations 0006+0007 proven on
+FK-linked data; schema now **v7**. **Next:** live `coach ingest mfp` end-to-end
+(diary + weight) once usage resets; watch the first real weight payload (the
+`item` vs `items` shape — normalizer tolerates both).
+
+---
+
+## Session 2026-07-24 (a) — MyFitnessPal direct adapter (branch `feat/mfp-adapter`)
 
 User wanted off the daily manual-export treadmill (Apple Health / MFP CSV) and
 asked about `python-myfitnesspal` / `myfitnesspal-mcp-python`. Recon: both hit

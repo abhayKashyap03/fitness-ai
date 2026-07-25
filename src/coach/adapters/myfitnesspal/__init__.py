@@ -23,10 +23,18 @@ API_BASE = "https://api.myfitnesspal.com"
 # same path; it returns {access_token, token_type, expires_in, user_id}.
 AUTH_TOKEN_PATH = "/user/auth_token"
 
-# Diary read. RECONCILE ON FIRST LIVE CONTACT (§10.2): this is our best
-# reconstruction of the web client's per-day read. If a live call 404s/400s,
-# the fix is a one-line change here + the fixture — nothing downstream moves.
+# Diary read. LIVE-RECONCILED against a real payload: keyed off `entry_date`
+# (an unknown/`date` param is ignored and MFP silently returns TODAY). The
+# response is per-MEAL aggregates (`type:'diary_meal'`, `nutritional_contents`);
+# the `items` list also carries non-food `exercise_entry`/`steps_aggregate` rows
+# that the normalizer filters out.
 DIARY_PATH = "/v2/diary"
+
+# Body measurements (weight, etc). Params: type=weight (the only type this
+# adapter reads) + entry_date=YYYY-MM-DD. Response: {"item": {value, unit,
+# date, updated_at, ...}} — value is in `unit` (e.g. "pounds"), date is the
+# logged day, updated_at carries a real instant + offset.
+MEASUREMENTS_PATH = "/v2/measurements"
 
 # Headers MFP's web client sends; mfp-client-id identifies the JS app.
 CLIENT_ID = "mfp-main-js"
