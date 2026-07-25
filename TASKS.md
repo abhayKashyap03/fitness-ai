@@ -217,10 +217,11 @@ Config: `COACH_LLM_PROVIDER` (google|anthropic), `GOOGLE_API_KEY` /
 Do **not** attempt these unattended. Listed so you don't waste the window trying.
 
 - **WHOOP 5.0 MG local BLE read** — needs the physical strap and a paired
-  Bluetooth radio. *Preparatory work you may do:* research NOOP / OpenWhoop /
-  OpenStrap, document 5.0 MG support status, and write `docs/adr/ble-approach.md`
-  with a recommendation. **Do not add BLE dependencies or write speculative
-  pairing code.**
+  Bluetooth radio. *Preparatory work DONE (2026-07-25):* ecosystem recon +
+  approach recorded in [ADR-0012](docs/adr/0012-ble-adapter-approach.md) —
+  5.0 protocol demonstrated by whoop-vault/NOOP (`fd4b` family); MG variant
+  pending a one-evening hardware spike (the ADR's acceptance gate). No BLE
+  dependencies or pairing code written, per this rule.
 - **HealthKit / Health Connect ingestion** — data lives on the phone. Blocked
   until the human sets up an export path.
 - **Live WHOOP API verification** — needs real credentials in `.env`.
@@ -300,6 +301,18 @@ scrape ban was **overridden with sign-off** for the user's own account
 - [ ] **LIVE verify (human):** paste `MFP_SESSION_COOKIE`, `coach ingest mfp
   --since <date>` → `normalize` → `status`. **Expect a field reconciliation** on
   the v2 diary READ shape — fix is one-line in the adapter + fixture if it 400s.
+
+## Session-3 revamp queue (DONE 2026-07-25, overnight)
+
+- [x] **MFP as daily driver** — `coach sync` = WHOOP + MFP (diary+weight) +
+  normalize; HealthKit demoted to explicit `--hk-file` backfill.
+- [x] **Gap-aware EWMA trend** — [ADR-0011](docs/adr/0011-gap-aware-weight-trend.md),
+  migration 0008 (schema v8); SQL view cross-validated against pure Python.
+- [x] **HRV validation harness** (risk #6) — `compute/hrv_validation.py` +
+  `coach eval hrv` (deterministic; needs real recovery data to say anything).
+- [x] **BLE recon ADR** — [ADR-0012](docs/adr/0012-ble-adapter-approach.md)
+  (see Blocked section note).
+- [x] **README refresh** — current sources, daily flow, full CLI surface.
 
 ## Phase 6B — MyFitnessPal CSV backfill (still valid, secondary)
 

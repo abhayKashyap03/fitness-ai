@@ -28,6 +28,119 @@
 
 ---
 
+## Session 2026-07-25 (overnight, autonomous) — MFP-as-daily-driver + Session-3 queue (branch `feat/mfp-adapter`)
+
+User instruction before sleeping: "modify code to use mfp now instead of healthkit
+(mainly ingest and sync cli commands)… then start the next tasks… document each
+step." Budget noted: ~9 h / $60. Each step below is one commit, in order.
+
+### Step 1 — `daba69a` refactor(cli): MFP is the daily driver
+- `coach sync` now runs: incremental WHOOP → incremental MFP (diary + weight,
+  `auto_since` watermark, `until` = today in COACH_HOME_TZ) → normalize.
+- HealthKit **removed from the automatic path**. It no longer silently ingests
+  a default `apple_health_export/export.xml`; it runs only when `--hk-file` is
+  passed explicitly, and `ingest healthkit` help now says "occasional backfill".
+  Rationale: MFP supplies daily food AND weight; re-reading a stale export
+  every sync was noise. The HealthKit adapter itself is untouched (it remains
+  the sanctioned body-comp backfill path).
+- Both sync sources skip cleanly when unconfigured (missing cookie → "not
+  configured"; expired cookie → "auth needed" + re-paste hint), matching the
+  WHOOP pattern. Verified: 230 tests, ruff, mypy; fresh-DB `sync` smoke run.
+- Swept for other daily-path healthkit references: `doctor` raw-counts line and
+  the explicit backfill command are the only remainders (both correct).
+  README has none (it predates all of this; refreshed in a later step).
+
+### READ THIS FIRST (wake-up summary)
+
+Five commits landed overnight on `feat/mfp-adapter`, all pushed to PR #11.
+Final state: **244 tests green, ruff + mypy clean, schema v8, working tree
+clean.** Nothing destructive touched; no live API calls were made; no new
+dependencies. What to do first:
+
+1. Paste `MFP_SESSION_COOKIE` into `.env`, then run the new daily driver:
+   `coach sync` (now WHOOP + MFP food + MFP weight + normalize in one shot).
+   Watch the first real WEIGHT payload — diary is live-confirmed but the
+   measurements response shape is docs-derived (`item` vs `items` both
+   tolerated; anything else is a one-line normalizer fix).
+2. `coach eval hrv` once a few weeks of recovery rows exist — it now measures
+   whether HRV is signal or noise on YOUR data (risk #6).
+3. Read [ADR-0012](docs/adr/0012-ble-adapter-approach.md) — BLE recon found the
+   5.0 protocol is cracked (whoop-vault/NOOP), and that the calibration play
+   must be TIME-SLICED (single BLE bond). The one-evening hardware spike
+   against your MG strap is the next gate there, and it needs you.
+4. Review + merge PR #11 when satisfied (I never merge).
+
+### Step 2 — `6442639` feat(trend): gap-aware EWMA (ADR-0011, migration 0008, schema v8)
+- Problem found while reviewing trend consumers: the EWMA smoothed per ROW.
+  After a 14-day travel gap the next weigh-in still moved the trend only 10%,
+  so the trend — and the TDEE + §8.6 guardrails that read it — lagged reality
+  for weeks after any gap. With the user's constant travel this was a live
+  correctness bug in the signal the whole cut steers by.
+- Fix: effective alpha over a g-day gap = 1-(1-α)^g (the daily EWMA composed g
+  times, so ungapped history is byte-identical — no discontinuity). Missing
+  days are still NOT interpolated (§2.7); only the decay sees the calendar.
+- Implementation is dual and cross-validated: pure-Python ground truth
+  (`compute/trends.py::gap_aware_ewma`, hand-calc tests) + migration 0008
+  recreates the `weight_trend` view with POWER(0.90, JULIANDAY gap) so every
+  reader is gap-aware with zero code change. A test pins view == Python on
+  gapped data (also guards against SQLite builds lacking math functions).
+- 234 tests green; ruff + mypy clean.
+
+### Step 3 — `ac77821` feat(validate): HRV-differentiator validation harness (risk #6)
+- CLAUDE.md §10.6 flags the project's core bet — HRV adds coaching signal
+  beyond weight+intake — as "must be validated, not assumed" (MacroFactor
+  excludes HRV as noise). Built the measurement, not the assumption:
+  `compute/hrv_validation.py` with pearson (honesty floor: <14 pairs or a
+  zero-variance side → Insufficient, never a fake r), lag-1 autocorrelation
+  (pairs only consecutive days — a gap breaks the pair, no interpolation),
+  coefficient of variation, and % deviation-from-trailing-baseline series.
+- `hrv_validation_report()` probes: HRV noise profile + today's-deviation vs
+  tomorrow's recovery score and tomorrow's total strain. Observational
+  correlations only; the printout says explicitly these are NECESSARY, not
+  sufficient, for the differentiator to be real. Interpretation stays human.
+- CLI: `coach eval hrv [--end --window]` — deterministic, zero tokens.
+- Honest note: one hand-computed test expectation was wrong (my arithmetic);
+  the test caught it and the TEST was fixed, code unchanged — noted per §6.2.
+- 244 tests green.
+
+### Step 4 — `e0d3e37` docs(adr): BLE recon + approach (ADR-0012)
+- Researched the local-BLE ecosystem (web recon; no code, no deps, per the
+  TASKS.md blocked-section rule). Material findings:
+  * 5.0 local read is NO LONGER UNPROVEN — `whoop-vault` (Python/Bleak/MIT,
+    protocol from the decompiled official APK, firmware r52 "Maverick")
+    demonstrates live 1 Hz HR/skin-temp/motion AND a full per-second
+    historical drain (`fd4b0002–0007` chars, CRC16 header + CRC32 payload,
+    4-byte alignment, ENTER_HIGH_FREQ_SYNC handshake, ~120 chunks/s).
+  * NOOP claims 5.0/**MG** live HR and documents the protocol split:
+    `61080001` + CRC8 = 4.0 vs `fd4b0001` + CRC16-Modbus = 5.0/MG.
+    OpenStrap is explicitly 4.0-only.
+  * NEW CONSTRAINT: the strap holds ONE encrypted BLE bond — official app and
+    a local reader cannot connect in parallel. §4's calibration play becomes
+    time-sliced (phone syncs normally; periodic laptop re-bond drains the
+    ~14-day on-strap buffer retroactively). Schema already models this
+    (sibling rows, read-time precedence) — zero schema impact.
+- Proposed approach in the ADR: Python+Bleak against `fd4b`, whoop-vault as
+  reference, historical-drain-first, `source='whoop_ble'`, objective
+  measurements only (`is_official=0`). Acceptance gate = one-evening hardware
+  spike with the user's strap. CLAUDE.md §4/§10.1/§12 refreshed from
+  "UNPROVEN" to demonstrated-on-5.0/MG-pending, pointing at the ADR.
+
+### Step 5 — `591ba3f` docs: README refresh
+- Was badly stale (claimed Python 3.14 required, "ingest/status land later",
+  Anthropic-only coach). Now documents: source table with statuses, real
+  daily flow (`coach sync`), the full CLI surface, provider-agnostic LLM
+  setup (Gemini free tier default), privacy posture (local SQLite; the LLM
+  sees computed summaries, never raw data or credentials).
+
+### Step 6 — this file + TASKS.md checkboxes; push; PR #11 comment
+- TASKS.md: Session-3 queue recorded done; BLE blocked-item updated to
+  "recon DONE, spike pending". Remaining unchecked work is all human-gated
+  (live MFP/LLM verification, CSV backfill recon-first, BLE spike, coaching
+  methodology) — deliberately NOT attempted unattended, per TASKS.md's own
+  "don't rush design-heavy work to fill time" rule.
+
+---
+
 ## Session 2026-07-24 (b) — MFP live reconciliation + weight + WHOOP fixes (branch `feat/mfp-adapter`)
 
 Follow-up to the same-day MFP adapter build, driven by the user's live testing.
