@@ -136,10 +136,15 @@ to pay $199–$359/yr forever to keep hardware they own.
   *different, approximate* numbers — not WHOOP's score.
 
 Community open-source projects for Adapter B (all unofficial, young, fragile —
-WHOOP can break them with firmware): **NOOP** (`github.com/ryanbr/noop`),
-**OpenWhoop**, **OpenStrap**. ⚠️ The 5.0 MG is the newest hardware and least
-community-tested — **local-read viability is UNPROVEN** and is the project's
-single biggest technical risk.
+WHOOP can break them with firmware): **whoop-vault**
+(`github.com/Sophonbot0/whoop-vault`, Python/Bleak/MIT — the protocol
+reference), **NOOP** (`github.com/ryanbr/noop`), **OpenStrap** (4.0 only).
+Recon 2026-07-25 (→ [ADR-0012](docs/adr/0012-ble-adapter-approach.md)): 5.0
+local read is **demonstrated** (live + full historical drain, `fd4b` service
+family) on Maverick-variant hardware; NOOP claims MG live HR. ⚠️ The user's
+exact **MG variant is still unverified** — a one-evening hardware spike is the
+gate — and the strap's single-BLE-bond means the calibration play must be
+**time-sliced**, not parallel (see the ADR).
 
 **The calibration play (why this shapes the code now):** run Adapter B in
 parallel with Adapter A *during* the paid window, and use WHOOP's official
@@ -382,7 +387,9 @@ subscription** — a Pro/Max plan grants no API access.
 
 ## 10. Things that will bite (known risk list)
 
-1. **WHOOP 5.0 MG local-read viability** — unproven; hardware-gated.
+1. **WHOOP 5.0 MG local-read viability** — 5.0 demonstrated by community
+   projects; the MG variant + firmware churn remain the risk. Hardware spike
+   gates Adapter B (→ ADR-0012).
 2. **Live API first contact** — everything WHOOP-side is built against synthetic
    fixtures. Field names and nesting will differ. Expected reconciliation, not
    failure. **Nothing new should be built on the spine until live ingest passes.**
@@ -427,7 +434,7 @@ Clean seams: yes. Premature machinery: no.
 | Source | Status |
 |---|---|
 | WHOOP Cloud API | ✅ Free OAuth 2.0 (v2). ~100 req/min. Requires active membership. Recovery *formula* is proprietary — we get the score + inputs, not the weighting. Supplies UTC offset, not IANA zone. |
-| WHOOP local BLE | ⚠️ Unofficial, open-source, 5.0 MG unproven |
+| WHOOP local BLE | ⚠️ Unofficial. 5.0 protocol demonstrated (whoop-vault, NOOP — `fd4b` family); MG variant pending hardware spike (ADR-0012) |
 | MyFitnessPal | API officially closed. **OVERRIDE (ADR-0010, signed off):** for THIS n=1 tool we ingest the user's OWN diary directly from MFP's private **v2 JSON API** — read only, authenticated with the user's pasted session cookie, **never** automating login. Fragile (private endpoints churn) but daily. The **Privacy Center → "Download My Data"** CSV export remains a valid, sanctioned occasional backfill. Do NOT generalize this override beyond the user's own account, and do NOT ship a scraper as a product feature. |
 | Apple HealthKit / Google Health Connect | ✅ But **not readable from a laptop** — data lives on-device. Bridge via Health export (XML zip). **Weight/body-comp source only** — MFP paywalled its Apple Health *nutrition* sync (~2024–25), so food does NOT reliably reach the export (n=1: 5 dietary days total, dead after 2026-02). |
 | USDA FoodData Central / Open Food Facts | ✅ Free, open — the intended nutrition DB path |
