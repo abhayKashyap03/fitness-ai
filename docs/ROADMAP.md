@@ -13,8 +13,8 @@ evenings-and-weekends pace. Guardrails and principles live in
 
 **Board columns** (Trello-style, adapted from Dane Wesolko's design board —
 dropping On-Hold / In Development / Archived as redundant at n=1):
-**Inbox** → **Backlog** (far-future / not-soon) → **Next Up** (actionable queue)
-→ **In Progress** → **Blocked** (dependency-gated) → **Review** → **Done**.
+**Inbox** → **Backlog/Upcoming** (far-future / not-soon) → **Next Up** (actionable
+queue) → **In Progress** → **Blocked** (dependency-gated) → **Review** → **Done**.
 
 ## Product data model (shipped product, decided 2026-07-26)
 
