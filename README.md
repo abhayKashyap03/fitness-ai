@@ -100,4 +100,5 @@ Every normalizer and compute function has unit tests; adapters are tested
 against recorded fixtures in `tests/fixtures/`, never live API calls. Schema
 changes only via numbered forward-only migrations in
 [`schema/migrations/`](schema/migrations/). Track progress in
-[`TASKS.md`](TASKS.md) and [`SESSION_LOG.md`](SESSION_LOG.md).
+[`TASKS.md`](TASKS.md) and [`SESSION_LOG.md`](SESSION_LOG.md); the long-range plan
+(CLI → iOS app → public) lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
