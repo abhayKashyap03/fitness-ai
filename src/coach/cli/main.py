@@ -361,9 +361,37 @@ def _cmd_status(settings: Settings, args: argparse.Namespace) -> int:
         f"  training: {t.sessions} session(s) "
         f"kcal={_fmt(t.kcal_active)} dur={_fmt(t.duration_s, 's')} strain={_fmt(t.strain)}"
     )
+    _print_plan_line(settings, date)
     for n in s.notes:
         print(f"    · {n}")
     return 0
+
+
+def _print_plan_line(settings: Settings, date: str) -> None:
+    """Compact plan status on the daily view, only when a plan is set."""
+    from ..coach.tools import get_plan_status
+
+    conn = db.connect(settings.db_path)
+    try:
+        p = get_plan_status(conn, end=date, user_id=settings.user_id)
+    finally:
+        conn.close()
+    if p["plan"] is None:
+        return
+    pl = p["plan"]
+    if p["status"] is None:
+        print(f"  plan [{pl['direction']} {pl['target_rate_pct_per_week']:+.2f}%/wk]: goal — (need TDEE + trend)")
+        return
+    st = p["status"]
+    goal = f" · goal {_fmt(st['goal_weight_kg'], 'kg')}" if st["goal_weight_kg"] is not None else ""
+    eta = f" · ETA {st['projected_goal_day']}" if st["projected_goal_day"] else ""
+    clamp = "  [floor-clamped]" if st["floor_clamped"] else ""
+    print(
+        f"  plan [{st['direction']} {st['target_rate_pct_per_week']:+.2f}%/wk]: "
+        f"{st['calorie_goal_kcal']:.0f} kcal/day{goal}{eta}{clamp}"
+    )
+    for a in st["alerts"]:
+        print(f"    ⚠ {a['message']}")
 
 
 def _cmd_tdee(settings: Settings, args: argparse.Namespace) -> int:
@@ -627,6 +655,135 @@ def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
+    """Set the active cut/bulk plan (ADR-0013). Accepts a %/week rate OR a
+    goal-weight+deadline (converted to a rate); the rate is always §8.6-clamped."""
+    from datetime import UTC, date, datetime
+
+    from ..compute.plan import rate_from_deadline, resolve_target_rate
+    from ..store.plan import PlanRow, insert_plan, plan_id
+
+    today = _today(settings)
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        row = conn.execute(
+            "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
+            "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",
+            (settings.user_id, today),
+        ).fetchone()
+        current_trend = row["trend_kg"] if row else None
+
+        note_extra = None
+        if args.maintain:
+            requested = 0.0
+        elif args.rate is not None:
+            requested = args.rate
+        elif args.goal_weight is not None and args.by is not None:
+            if current_trend is None:
+                print(
+                    "Deadline entry needs a current weight trend, and there is none yet. "
+                    "Log some weight first, or set a --rate directly.",
+                    file=sys.stderr,
+                )
+                return 1
+            weeks = (date.fromisoformat(args.by) - date.fromisoformat(today)).days / 7
+            if weeks <= 0:
+                print(f"--by must be a future date (got {args.by}).", file=sys.stderr)
+                return 2
+            requested = rate_from_deadline(
+                current_weight_kg=current_trend, goal_weight_kg=args.goal_weight, weeks=weeks
+            )
+            note_extra = f"deadline entry {args.goal_weight}kg by {args.by}"
+        else:
+            print(
+                "Specify one of: --rate PCT_PER_WEEK, --goal-weight KG --by YYYY-MM-DD, "
+                "or --maintain.",
+                file=sys.stderr,
+            )
+            return 2
+
+        target = resolve_target_rate(requested)
+        note = target.note
+        if note_extra:
+            note = f"{note_extra}; {note}" if note else note_extra
+
+        created_at = datetime.now(UTC).isoformat()
+        insert_plan(
+            conn,
+            PlanRow(
+                id=plan_id(settings.user_id, created_at),
+                user_id=settings.user_id,
+                created_at=created_at,
+                start_day_key=today,
+                direction=target.direction,
+                target_rate_pct_per_week=target.rate_pct_per_week,
+                start_weight_kg=current_trend,
+                goal_weight_kg=args.goal_weight,
+                protein_g_per_kg=args.protein,
+                note=note,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(
+        f"Plan set: {target.direction} at {target.rate_pct_per_week:+.2f}%/week"
+        + (f" (anchor {current_trend:.2f}kg)" if current_trend is not None else "")
+        + (f", goal {args.goal_weight}kg" if args.goal_weight is not None else "")
+    )
+    if target.clamped:
+        print(f"  ⚠ {target.note}")
+    print("Run `coach plan status` for the daily calorie goal.")
+    return 0
+
+
+def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
+    from ..coach.tools import get_plan_status
+
+    end = args.end or _today(settings)
+    conn = db.connect(settings.db_path)
+    try:
+        p = get_plan_status(conn, end=end, window=args.window, user_id=settings.user_id)
+    finally:
+        conn.close()
+
+    if args.json:
+        import json as _json
+
+        print(_json.dumps(p))
+        return 0
+
+    if p["plan"] is None:
+        print("No active plan. Set one with `coach plan set` (see --help).")
+        return 0
+    pl = p["plan"]
+    print(f"── Plan · {pl['direction']} {pl['target_rate_pct_per_week']:+.2f}%/week ──")
+    if pl["goal_weight_kg"] is not None:
+        print(f"  goal weight:      {pl['goal_weight_kg']} kg")
+    if pl["start_weight_kg"] is not None:
+        print(f"  start weight:     {pl['start_weight_kg']:.2f} kg ({pl['start_day_key']})")
+    if p["status"] is None:
+        need = p["insufficient"]
+        print(f"  daily goal:       — (insufficient data: need {need['needed']}, have {need['have']})")
+        return 0
+    st = p["status"]
+    print(f"  measured TDEE:    {st['tdee_kcal']:.0f} kcal/day")
+    print(f"  current trend:    {st['current_trend_kg']:.2f} kg")
+    print(f"  target rate:      {st['target_rate_kg_per_week']:+.3f} kg/week")
+    print(
+        f"  daily goal:       {st['calorie_goal_kcal']:.0f} kcal/day "
+        f"(TDEE {st['daily_kcal_delta']:+.0f})"
+        + ("  [floor-clamped]" if st["floor_clamped"] else "")
+    )
+    if st["weeks_to_goal"] is not None:
+        print(f"  projection:       ~{st['weeks_to_goal']:.1f} weeks → {st['projected_goal_day']}")
+    for a in st["alerts"]:
+        print(f"  ⚠ {a['message']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="coach", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -728,6 +885,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="ALSO ingest an Apple Health export (occasional weight backfill; not part of the daily path)",
     )
     p_sync.set_defaults(func=_cmd_sync)
+
+    p_plan = sub.add_parser("plan", help="set / show the cut/bulk plan (ADR-0013)")
+    plan_sub = p_plan.add_subparsers(dest="plan_command", required=True)
+    p_ps = plan_sub.add_parser(
+        "set", help="set the active plan (--rate | --goal-weight --by | --maintain)"
+    )
+    p_ps.add_argument(
+        "--rate", type=float, default=None,
+        help="signed %%/week target (e.g. -0.5 to cut, 0.25 to bulk)",
+    )
+    p_ps.add_argument("--goal-weight", type=float, default=None, help="goal weight in kg")
+    p_ps.add_argument(
+        "--by", default=None, help="deadline YYYY-MM-DD (with --goal-weight; rate is clamped)"
+    )
+    p_ps.add_argument("--protein", type=float, default=None, help="protein floor g/kg (optional)")
+    p_ps.add_argument("--maintain", action="store_true", help="maintenance plan (rate 0)")
+    p_ps.set_defaults(func=_cmd_plan_set)
+    p_pst = plan_sub.add_parser("status", help="daily calorie goal + projection for the active plan")
+    p_pst.add_argument("--end", default=None, help="day_key YYYY-MM-DD (default: today)")
+    p_pst.add_argument("--window", type=int, default=14, help="TDEE window in days")
+    p_pst.add_argument("--json", action="store_true", help="machine-readable output")
+    p_pst.set_defaults(func=_cmd_plan_status)
 
     return parser
 

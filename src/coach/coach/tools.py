@@ -24,8 +24,10 @@ from dataclasses import asdict, dataclass
 
 from ..compute.daily import daily_status
 from ..compute.guardrails import Alert, TrendPoint, weight_loss_rate_alert
+from ..compute.plan import plan_status
 from ..compute.tdee import build_window, estimate_tdee
 from ..compute.trends import Insufficient
+from ..store.plan import active_plan
 from .llm import ToolSpec as LLMToolSpec
 
 Handler = Callable[..., dict]
@@ -221,6 +223,53 @@ def get_safety_flags(
     return {"end": end, "window": window, "alerts": alerts, "insufficient": insufficient}
 
 
+def get_plan_status(
+    conn: sqlite3.Connection, *, end: str, window: int = 14, user_id: int = 1
+) -> dict:
+    """The active cut/bulk plan vs measured state (Phase 7, ADR-0013).
+
+    Returns the daily calorie goal, target rate, timeline projection, and any
+    fired §8.6 safety alert — all computed by ``compute.plan`` (no math here).
+    ``plan`` is null when none is set; ``status`` is null with an ``insufficient``
+    marker when TDEE or the weight trend can't be measured (§2.2). The daily goal
+    is always past the calorie-floor clamp — the floor wins.
+    """
+    plan = active_plan(conn, user_id=user_id)
+    if plan is None:
+        return {"end": end, "plan": None, "status": None, "insufficient": None}
+
+    plan_dict = {
+        "direction": plan.direction,
+        "target_rate_pct_per_week": plan.target_rate_pct_per_week,
+        "goal_weight_kg": plan.goal_weight_kg,
+        "start_day_key": plan.start_day_key,
+        "start_weight_kg": plan.start_weight_kg,
+    }
+
+    est = estimate_tdee(build_window(conn, end, window, user_id))
+    tdee_kcal = None if isinstance(est, Insufficient) else est.tdee_kcal
+    row = conn.execute(
+        "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
+        "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",
+        (user_id, end),
+    ).fetchone()
+    current_trend = row["trend_kg"] if row else None
+
+    st = plan_status(
+        direction=plan.direction,
+        target_rate_pct_per_week=plan.target_rate_pct_per_week,
+        goal_weight_kg=plan.goal_weight_kg,
+        tdee_kcal=tdee_kcal,
+        current_trend_kg=current_trend,
+        end_day=end,
+    )
+    if isinstance(st, Insufficient):
+        return {"end": end, "plan": plan_dict, "status": None, "insufficient": _insufficient(st)}
+    # asdict recurses PlanStatus.alerts (Alert dataclasses) into the same dict
+    # shape as _alert — no prose, structured only.
+    return {"end": end, "plan": plan_dict, "status": asdict(st), "insufficient": None}
+
+
 # ---- registry --------------------------------------------------------------
 
 _DAY = {
@@ -305,6 +354,21 @@ TOOLS: list[ToolSpec] = [
             "properties": {"end": _DAY, "window": _WINDOW},
         },
         handler=get_safety_flags,
+    ),
+    ToolSpec(
+        name="get_plan_status",
+        description=(
+            "The user's active cut/bulk plan vs measured state: today's calorie "
+            "goal, target rate, projected timeline to goal weight, and any fired "
+            "§8.6 safety alert. All numbers are code-computed and floor-clamped. "
+            "plan=null means no plan is set; status=null with an insufficient "
+            "marker means TDEE or the weight trend can't be measured yet."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"end": _DAY, "window": _WINDOW},
+        },
+        handler=get_plan_status,
     ),
 ]
 

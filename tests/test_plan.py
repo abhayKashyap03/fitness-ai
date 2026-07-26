@@ -224,3 +224,29 @@ def test_plan_direction_check_constraint(migrated_conn):
     bad = PlanRow(**{**bad.__dict__, "direction": "shrink"})
     with pytest.raises(sqlite3.IntegrityError):
         insert_plan(migrated_conn, bad)
+
+
+# ---- get_plan_status tool (DB assembly) ------------------------------------
+
+
+def test_get_plan_status_tool_no_plan(migrated_conn):
+    from coach.coach.tools import get_plan_status
+
+    out = get_plan_status(migrated_conn, end="2026-07-26")
+    assert out["plan"] is None
+    assert out["status"] is None
+    assert out["insufficient"] is None
+
+
+def test_get_plan_status_tool_insufficient_without_data(migrated_conn):
+    from coach.coach.tools import get_plan_status
+
+    insert_plan(migrated_conn, _row("2026-07-01T00:00:00+00:00", -0.5))
+    migrated_conn.commit()
+
+    out = get_plan_status(migrated_conn, end="2026-07-26")
+    # plan echoed back, but no TDEE/trend yet -> honest insufficient, never a goal
+    assert out["plan"] is not None
+    assert out["plan"]["direction"] == "cut"
+    assert out["status"] is None
+    assert out["insufficient"] == {"have": 0, "needed": 1}
