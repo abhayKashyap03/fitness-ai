@@ -27,6 +27,10 @@ CRITICAL_LOSS_PCT_PER_WEEK = 1.5
 # Absolute intake floor. Conservative, sex-agnostic v0; a lower bound no target
 # may drop beneath regardless of what the deficit math "wants".
 MIN_CALORIE_FLOOR_KCAL = 1200.0
+# The sustainable-loss ceiling a plan TARGET may not exceed (ADR-0013). Same
+# number as the per-week warn threshold — a target should never be set above the
+# rate we'd warn about observing. Gains are out of §8.6 scope (not clamped here).
+MAX_TARGET_LOSS_PCT_PER_WEEK = WARN_LOSS_PCT_PER_WEEK
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,22 @@ def clamp_calorie_target(
 ) -> float:
     """Return a target never below the hard floor. The floor wins, always."""
     return max(target_kcal, floor)
+
+
+def clamp_target_loss_rate(
+    rate_pct_per_week: float, *, ceiling: float = MAX_TARGET_LOSS_PCT_PER_WEEK
+) -> float:
+    """Clamp a plan's signed target rate so LOSS never exceeds the ceiling.
+
+    Rate is signed (negative = loss). A loss steeper than ``ceiling`` %/week is
+    clamped up to ``-ceiling`` (ADR-0013 — deadline entries that imply an unsafe
+    rate are made safe at set time, the timeline stretches honestly). Gains
+    (positive) and maintain (0) pass through unchanged — bulk rate is out of
+    §8.6 scope.
+    """
+    if rate_pct_per_week < -ceiling:
+        return -ceiling
+    return rate_pct_per_week
 
 
 def calorie_floor_alert(

@@ -12,14 +12,13 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 State: **304 tests green · ruff + mypy clean · schema v9 · on `main` after PRs #12–#14 merged.**
 Phases 0–6A done; the coach answers grounded questions live. What's left, in priority order:
 
-1. **🔒🧑 Phase 7 — the cut/bulk PLAN layer (the missing product core).** Everything
-   so far *observes*; nothing yet *steers*. This is the deterministic target →
-   calorie-goal → adherence machinery, clamped by the existing §8.6 guardrails
-   (`clamp_calorie_target`, `calorie_floor_alert` are already built and waiting).
-   **BLOCKED on one human decision** — see [DECISIONS_NEEDED.md](DECISIONS_NEEDED.md)
-   D5: is a target set by *goal-weight + deadline* or by *%/week rate*? The HRV=noise
-   finding (below) means lean on weight-trend + intake; treat recovery as a lighter input.
-   Full sketch in **Phase 7** below.
+1. **✅ Phase 7 — the cut/bulk PLAN layer — BUILT (T7.0–T7.4), awaiting live verify (T7.5).**
+   The first thing that *steers* rather than observes. D5 resolved as option C
+   ([ADR-0013](docs/adr/0013-plan-target-model.md)): a signed rate is the canonical
+   driver; a deadline reduces to a §8.6-clamped rate. Shipped: migration 0010
+   (`plan` table, schema v10), `store/plan.py`, `compute/plan.py`, `get_plan_status`
+   tool, `coach plan set|status` + a `coach status` plan line. **Remaining: T7.5
+   live verify on the real DB** (needs ≥10 logged-intake days for a real goal).
 2. **🧑 BLE hardware spike (Adapter B)** — the one-evening gate in
    [ADR-0012](docs/adr/0012-ble-adapter-approach.md). Needs the physical MG strap.
    Unlocks `compute/calibration.py` (built, no live caller yet — nothing to compare
@@ -396,19 +395,33 @@ LLM only narrates. Guardrails already exist (`compute/guardrails.py`).
 goal-weight+deadline vs %/week rate. Do NOT pick this alone (one-way door: it
 shapes the schema and every downstream number). Sketch, once D5 lands:
 
-- [ ] **T7.0 — `plan` canonical table + migration** — one active plan per user:
-  direction (cut/bulk/maintain), target (per D5), start/target weight, rate,
-  protein floor. Sibling-row/provenance pattern; forward-only migration.
-- [ ] **T7.1 — `compute/plan.py`** (pure) — from the plan + adaptive TDEE +
-  weight trend: daily calorie goal, projected timeline, on/off-track delta.
-  Every output degrades to Insufficient on thin data (§2.7). Clamped by §8.6
-  (calorie floor, max loss rate) — the clamp wins, always.
-- [ ] **T7.2 — `get_plan_status` coach tool** — structured plan-vs-actual, with
-  any fired safety Alert surfaced verbatim. No prose, no math.
-- [ ] **T7.3 — CLI** — `coach plan set …` / `coach plan status`; `coach status`
-  gains a plan line. `coach ask` can now reason about adherence.
-- [ ] **T7.4 — Tests** — target math against hand-computed fixtures; guardrail
-  clamps fire; insufficient-data paths; timeline projection tolerance.
+- [x] **T7.0 — `plan` table + migration 0010 (schema v10)** — first USER-AUTHORED
+  table (not raw-derived; no raw_ref, not in the rebuild/fingerprint). Append-only
+  history, one `is_active` row per user; `direction` CHECK; signed
+  `target_rate_pct_per_week` as the canonical driver (ADR-0013). `store/plan.py`
+  (`PlanRow`, `insert_plan` supersedes prior, `active_plan`).
+- [x] **T7.1 — `compute/plan.py`** (pure) — `resolve_target_rate` (§8.6 loss
+  clamp + note), `rate_from_deadline` (deadline→rate), `plan_status` (daily
+  calorie goal from TDEE + rate, floor-clamped; timeline projection; Insufficient
+  without TDEE/trend). Guardrail `clamp_target_loss_rate` added. Hand-checked
+  tests in `test_plan.py` (17). **321 tests green; ruff + mypy clean.**
+- [x] **T7.2 — `get_plan_status` coach tool** — reads active plan + TDEE + latest
+  trend, calls `plan_status`; fired Alerts surfaced verbatim; registered in `TOOLS`.
+  Now the 7th coach tool — `coach ask` can reason about adherence.
+- [x] **T7.3 — CLI** — `coach plan set (--rate | --goal-weight --by | --maintain)
+  [--protein] [--start-date --start-weight]` and `coach plan status [--end --window
+  --json]`; `coach status` gained a plan line. `plan set` clamps the rate at set
+  time and anchors start weight from the trend. Smoke-verified: rate/deadline/
+  maintain, clamp fires, backdated anchor, insufficient degrades honestly.
+- [x] **T7.4 — already-started support + adherence** — a mid-cut user can backdate
+  the start (`--start-date`/`--start-weight`); `plan_status` then reports progress
+  (kg changed, actual rate vs target → `adherence` label: on_track/ahead/behind/
+  wrong_way). A same-day plan shows no progress yet (§2.7, not a zero). 26 tests in
+  `test_plan.py`. **328 tests green; ruff + mypy clean.**
+- [ ] **T7.5 — LIVE verify (human)** — on the real DB: `coach plan set --rate -0.5
+  --goal-weight <kg>` → `coach plan status` (needs ≥10 logged-intake days + a weight
+  trend for a real goal) → check the plan line in `coach status`. Then let the coach
+  use it: `coach ask "am I on track for my cut?"`.
 
 ## Phase 6B — MyFitnessPal CSV backfill (still valid, secondary)
 
