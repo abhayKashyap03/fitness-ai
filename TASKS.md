@@ -9,28 +9,26 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ## ▶ NEXT UP (start here — updated 2026-07-26)
 
-State: **304 tests green · ruff + mypy clean · schema v9 · on `main` after PRs #12–#14 merged.**
-Phases 0–6A done; the coach answers grounded questions live. What's left, in priority order:
+State: **328 tests green · ruff + mypy clean · schema v10 · on `main` after PRs #12–#16 merged.**
+Phases 0–7 done. The coach answers grounded questions live, and now *steers*: a
+cut/bulk plan sets a daily calorie goal + adherence. Evals pass. Running daily on
+real data. What's left, in priority order:
 
-1. **✅ Phase 7 — the cut/bulk PLAN layer — BUILT (T7.0–T7.4), awaiting live verify (T7.5).**
-   The first thing that *steers* rather than observes. D5 resolved as option C
-   ([ADR-0013](docs/adr/0013-plan-target-model.md)): a signed rate is the canonical
-   driver; a deadline reduces to a §8.6-clamped rate. Shipped: migration 0010
-   (`plan` table, schema v10), `store/plan.py`, `compute/plan.py`, `get_plan_status`
-   tool, `coach plan set|status` + a `coach status` plan line. **Remaining: T7.5
-   live verify on the real DB** (needs ≥10 logged-intake days for a real goal).
-2. **🧑 BLE hardware spike (Adapter B)** — the one-evening gate in
-   [ADR-0012](docs/adr/0012-ble-adapter-approach.md). Needs the physical MG strap.
+1. **🧑 BLE hardware spike (Adapter B)** — the biggest open item and the
+   subscription-survival play. One-evening gate in
+   [ADR-0012](docs/adr/0012-ble-adapter-approach.md); needs the physical MG strap.
    Unlocks `compute/calibration.py` (built, no live caller yet — nothing to compare
-   against until `whoop_ble` rows exist). Subscription-survival play.
-3. **🧑 `coach eval grounding` clean 3/3 pass** — scorer fixed; free-tier 20 req/min
-   quota throttles a full run. Re-run on fresh quota, or point it at Grok/Anthropic.
-4. **⏭️ Phase 6B — MFP CSV backfill** — secondary; the daily v2 API path covers current data.
+   against until `whoop_ble` sibling rows exist).
+2. **⏳ Plan layer: full TDEE-backed goal** — plan layer is live (T7.0–T7.5), but the
+   daily calorie goal reads `Insufficient` until adaptive TDEE has ≥10 logged-intake
+   days ([ADR-0005](docs/adr/0005-adaptive-tdee.md)). Adherence works today (trend
+   only). Just needs a few more days of logging — no code.
+3. **⏭️ Phase 6B — MFP CSV backfill** — secondary; the daily v2 API path covers current data.
 
-Housekeeping done this session (2026-07-26): full codebase sweep for placeholder/
-hardcoded output — **only `coach eval hrv` was one, already fixed in #14**; the rest
-computes from real data or is honestly gated on a missing source (BLE, target layer).
-Docs refreshed (this file, README, SESSION_LOG).
+Recently done (2026-07-26): **Phase 7 cut/bulk plan layer shipped + live-verified**
+(#16, incl. mid-cut backdating + adherence); Grok provider (#13); HRV verdict —
+**NOISE** on real data (#14); placeholder sweep (only `eval hrv` was one, fixed);
+**`eval grounding` + `eval hrv` pass**. Docs + Notion hub refreshed.
 
 ---
 
@@ -360,9 +358,8 @@ scrape ban was **overridden with sign-off** for the user's own account
   only formats. Degradation contract tested without credentials.
 - [x] **Grounding scorer fix** — prose dates + tool-derived allowed numbers;
   the eval was failing correct answers 3/3.
-- [ ] **`coach eval grounding` clean pass** — the scorer is fixed and the eval
-  now runs, but the free tier's 20 req/min quota throttles a full 3-scenario
-  run. Re-run on fresh quota to confirm 3/3.
+- [x] **`coach eval grounding` clean pass** — passes (confirmed 2026-07-26).
+  Zero-fabrication guard holds on real data.
 
 ## Session-5 (2026-07-26) — Grok provider, HRV verdict, doc/code sweep
 
@@ -418,10 +415,10 @@ shapes the schema and every downstream number). Sketch, once D5 lands:
   (kg changed, actual rate vs target → `adherence` label: on_track/ahead/behind/
   wrong_way). A same-day plan shows no progress yet (§2.7, not a zero). 26 tests in
   `test_plan.py`. **328 tests green; ruff + mypy clean.**
-- [ ] **T7.5 — LIVE verify (human)** — on the real DB: `coach plan set --rate -0.5
-  --goal-weight <kg>` → `coach plan status` (needs ≥10 logged-intake days + a weight
-  trend for a real goal) → check the plan line in `coach status`. Then let the coach
-  use it: `coach ask "am I on track for my cut?"`.
+- [x] **T7.5 — LIVE verify** — plan set on the real DB works end to end; `coach plan
+  status` + the `coach status` plan line render; adherence computes off the trend.
+  Daily calorie goal still shows `Insufficient` until TDEE reaches 10 logged-intake
+  days (by design, ADR-0005) — fills in with a few more days of logging, no code.
 
 ## Phase 6B — MyFitnessPal CSV backfill (still valid, secondary)
 
