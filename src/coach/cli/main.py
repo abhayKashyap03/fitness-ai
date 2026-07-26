@@ -127,7 +127,7 @@ def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
         settings.whoop_client_secret,
         settings.whoop_redirect_uri,
     )
-    store = TokenStore(whoop_token_path())
+    store = TokenStore(whoop_token_path(settings.user_id))
     try:
         tokens = run_login(oauth, store, settings.whoop_redirect_uri)
     except (ReauthRequired, RuntimeError) as exc:
@@ -160,7 +160,7 @@ def _whoop_client(settings: Settings) -> WhoopClient:
         settings.whoop_client_secret,
         settings.whoop_redirect_uri,
     )
-    store = TokenStore(whoop_token_path())
+    store = TokenStore(whoop_token_path(settings.user_id))
     return WhoopClient(lambda: oauth.valid_access_token(store))
 
 
@@ -224,7 +224,7 @@ def _mfp_client(settings: Settings):
     from ..paths import mfp_token_path
 
     auth = MfpAuth(settings.mfp_session_cookie)
-    store = MfpTokenStore(mfp_token_path())
+    store = MfpTokenStore(mfp_token_path(settings.user_id))
 
     def creds() -> tuple[str, str]:
         tok = auth.valid_token(store)
@@ -562,7 +562,7 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
     try:
         settings.require_whoop()
         print("  whoop creds:    configured")
-        store = TokenStore(whoop_token_path())
+        store = TokenStore(whoop_token_path(settings.user_id))
         tokens = store.load() if store.exists() else None
         if tokens is None:
             problems += 1
