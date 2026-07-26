@@ -67,6 +67,8 @@ coach plan set --rate -0.5 --goal-weight 78   # set a cut/bulk plan (ADR-0013)
 coach plan status                  # daily calorie goal + timeline + adherence
 coach ask "am I on track for my cut?"         # the coach — grounded in YOUR data
 
+coach web                          # local dashboard at http://127.0.0.1:8000
+
 coach db backup                    # consistent online snapshot
 coach db verify                    # integrity + row counts + rebuild fingerprint
 coach doctor                       # config/db/token sanity report
@@ -77,6 +79,19 @@ coach normalize --rebuild          # re-derive ALL canonical rows from raw
 
 An occasional Apple Health export ingests with
 `coach ingest healthkit --file export.zip` (or `coach sync --hk-file …`).
+
+### Web dashboard
+
+`coach web` serves a local dashboard — the daily "single circle", weight trend,
+plan status, and the coach chat — over the same deterministic compute the CLI
+uses ([ADR-0014](docs/adr/0014-local-web-ui.md)). It needs the optional extra:
+
+```bash
+pip install -e ".[web]"
+```
+
+It **binds `127.0.0.1` by default**: this serves personal health data with no
+authentication, so exposing it on a network is a deliberate `--host` opt-in.
 
 ## Data & privacy
 

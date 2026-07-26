@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% set nav = 'plan' %}
+{% block title %}Coach · Plan{% endblock %}
+
+{% block content %}
+<h1>Plan</h1>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+{% set p = plan.plan %}
+{% set ps = plan.status %}
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>Active plan</h2>
+  {% if not p %}
+    <p class="absent">none set</p>
+  {% else %}
+    <div class="row"><span class="k">direction</span><span class="v">{{ p.direction }}</span></div>
+    <div class="row"><span class="k">target rate</span><span class="v">{{ m.signed(p.target_rate_pct_per_week, ' %/week') }}</span></div>
+    <div class="row"><span class="k">goal weight</span><span class="v">{{ m.val(p.goal_weight_kg, ' kg', 1, 'none set') }}</span></div>
+    <div class="row"><span class="k">started</span><span class="v">{{ p.start_day_key }} at {{ m.val(p.start_weight_kg, ' kg', 2) }}</span></div>
+
+    {% if ps %}
+      <hr style="border:0;border-top:1px solid var(--line);margin:.9rem 0">
+      <div class="row"><span class="k">measured TDEE</span><span class="v">{{ m.val(ps.tdee_kcal, ' kcal', 0) }}</span></div>
+      <div class="row"><span class="k">current trend</span><span class="v">{{ m.val(ps.current_trend_kg, ' kg', 2) }}</span></div>
+      <div class="row"><span class="k">target rate</span><span class="v">{{ m.signed(ps.target_rate_kg_per_week, ' kg/week', 3) }}</span></div>
+      <div class="row"><span class="k">daily goal</span>
+        <span class="v"><strong>{{ m.val(ps.calorie_goal_kcal, ' kcal', 0) }}</strong>
+          (TDEE {{ m.signed(ps.daily_kcal_delta, '', 0) }}){{ ' — floor-clamped' if ps.floor_clamped }}</span></div>
+      {% if ps.weeks_to_goal is not none %}
+        <div class="row"><span class="k">projection</span><span class="v">~{{ ps.weeks_to_goal }} weeks → {{ ps.projected_goal_day }}</span></div>
+      {% endif %}
+      {% if ps.adherence %}
+        <div class="row"><span class="k">progress</span>
+          <span class="v">{{ m.signed(ps.kg_changed_so_far, ' kg') }} over {{ ps.elapsed_days }}d
+            ({{ m.signed(ps.actual_rate_kg_per_week, ' kg/wk', 3) }}) →
+            <strong>{{ ps.adherence.replace('_',' ')|upper }}</strong></span></div>
+      {% endif %}
+      {{ m.alerts(ps.alerts) }}
+    {% else %}
+      <hr style="border:0;border-top:1px solid var(--line);margin:.9rem 0">
+      <p>Daily goal: {{ m.insufficient(plan.insufficient) }}</p>
+      <p class="note">Adaptive TDEE needs ~10 logged-intake days. Adherence still works
+        (it only needs the weight trend).</p>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Set plan</h2>
+  <p class="note">A target loss faster than the sustainable ceiling is clamped in code
+    (§8.6) — the timeline stretches rather than promising an unsafe date (ADR-0013).</p>
+  <form method="post" action="/plan">
+    <label>How do you want to set the target?</label>
+    <select name="mode">
+      <option value="rate">Rate — %/week</option>
+      <option value="deadline">Goal weight + deadline</option>
+      <option value="maintain">Maintain</option>
+    </select>
+
+    <label>Rate (%/week — negative to cut, e.g. -0.5)</label>
+    <input type="number" name="rate" step="0.05" placeholder="-0.5">
+
+    <label>Goal weight (kg)</label>
+    <input type="number" name="goal_weight" step="0.1" placeholder="78">
+
+    <label>Deadline (only with goal weight)</label>
+    <input type="date" name="by">
+
+    <label>Already started? Backdate the start (optional)</label>
+    <input type="date" name="start_date">
+    <p class="note">Anchors progress/adherence to when the cut actually began; the start
+      weight is taken from the trend on that date.</p>
+
+    <p><button type="submit">Set plan</button></p>
+  </form>
+</div>
+{% endblock %}

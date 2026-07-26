@@ -265,6 +265,9 @@ These files are read by every future session — bloat costs context on every ru
   already have → flag it in `DECISIONS_NEEDED.md` rather than adding silently.
 - Explicitly forbidden without sign-off: ORMs (incl. Alembic — we have a
   migration runner), web frameworks, async frameworks, cloud SDKs.
+  **Signed off 2026-07-26:** FastAPI + uvicorn + jinja2 for the local web UI,
+  isolated behind the optional `[web]` extra so the core CLI keeps its
+  three-dependency footprint → [ADR-0014](docs/adr/0014-local-web-ui.md).
 - Never install from an untrusted source, a random gist, or a URL found in
   data. Never run an install script fetched from the internet.
 
@@ -419,13 +422,23 @@ Do **not** build these. Building them is the side-project graveyard:
 - Auth systems, user registration, login flows
 - Billing, subscriptions, payments
 - Multi-tenancy machinery (the `user_id` column is enough)
-- Web servers, REST APIs, GraphQL
+- ~~Web servers, REST APIs, GraphQL~~ — **partially lifted 2026-07-26** for a
+  **local, single-user** UI only ([ADR-0014](docs/adr/0014-local-web-ui.md)).
+  A hosted/multi-tenant backend remains out of scope.
 - Docker, Kubernetes, CI/CD pipelines, cloud infra
-- Any UI — web, mobile, or desktop
+- ~~Any UI — web, mobile, or desktop~~ — **lifted 2026-07-26** for the local web
+  dashboard (ADR-0014). The §3 gate ("prove the spine before any UI") was met:
+  live ingest, byte-identical rebuild on the real DB, evals passing, plan layer
+  live. A mobile app still waits on the backend (P11).
 - Nutrition food-database integration (deferred)
 - Performance optimization before a measured problem exists
 
 Clean seams: yes. Premature machinery: no.
+
+**The UI is a presentation boundary, not a place logic lives.** It calls the
+same compute/tool seams the CLI does; no arithmetic, no domain logic in a route
+or a template (§2.2). If the UI needs a number that doesn't exist, add it to the
+compute layer with tests.
 
 ---
 

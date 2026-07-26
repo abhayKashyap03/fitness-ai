@@ -1,0 +1,27 @@
+{# Rendering helpers. The ONLY rule that matters here: a missing value is
+   rendered as missing (§2.7) — never as 0, never as something that reads like a
+   measurement. Formatting is presentation; no value is derived here. #}
+
+{% macro val(v, unit='', dp=1, absent='not recorded') -%}
+{%- if v is none -%}<span class="absent">{{ absent }}</span>
+{%- elif v is number -%}{{ ("%." ~ dp ~ "f")|format(v) }}{{ unit }}
+{%- else -%}{{ v }}{{ unit }}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro signed(v, unit='', dp=2, absent='not recorded') -%}
+{%- if v is none -%}<span class="absent">{{ absent }}</span>
+{%- else -%}{{ ("%+." ~ dp ~ "f")|format(v) }}{{ unit }}
+{%- endif -%}
+{%- endmacro %}
+
+{# An insufficient-data marker is a real answer, not an error. #}
+{% macro insufficient(marker) -%}
+<span class="absent">insufficient data — need {{ marker.needed }}, have {{ marker.have }}</span>
+{%- endmacro %}
+
+{% macro alerts(items) -%}
+{%- for a in items %}
+<div class="alert {{ 'critical' if a.level == 'critical' }}">{{ a.message }}</div>
+{%- endfor %}
+{%- endmacro %}
