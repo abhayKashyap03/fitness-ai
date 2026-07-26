@@ -599,68 +599,31 @@ def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     weight); an Apple Health export is an occasional backfill, run only when
     ``--hk-file`` is passed explicitly.
     """
-    from datetime import date as _date
-
-    from ..adapters.myfitnesspal.auth import MfpAuthError
-    from ..adapters.myfitnesspal.ingest import auto_since as mfp_auto_since
-    from ..adapters.myfitnesspal.ingest import ingest_mfp
-    from ..adapters.whoop.ingest import auto_since
-    from ..normalize.runner import normalize_all as _normalize
+    from ..services.sync import run_sync
 
     conn = db.connect(settings.db_path)
     try:
         _ensure_migrated(conn)
-        # WHOOP (skip cleanly when unconfigured)
-        try:
-            settings.require_whoop()
-            since = auto_since(conn)
-            if since is None:
-                print("  whoop: no prior ingest — run `coach ingest whoop --since <date>` once first")
-            else:
-                print(f"  whoop: incremental since {since}")
-                result = ingest_whoop(
-                    conn, _whoop_client(settings), since=since, user_id=settings.user_id
-                )
-                for rtype, c in result.items():
-                    print(f"    {rtype:18} inserted={c['inserted']:4d} skipped={c['skipped']:4d}")
-        except ConfigError:
-            print("  whoop: not configured — skipped")
-        except ReauthRequired as exc:
-            print(f"  whoop: auth needed ({exc}) — skipped", file=sys.stderr)
-
-        # MyFitnessPal food + weight (skip cleanly when unconfigured)
-        try:
-            settings.require_mfp()
-            m_since = mfp_auto_since(conn)
-            if m_since is None:
-                print("  mfp: no prior ingest — run `coach ingest mfp --since <date>` once first")
-            else:
-                until = _date.fromisoformat(_today(settings)).isoformat()
-                print(f"  mfp: incremental since {m_since}")
-                res = ingest_mfp(
-                    conn, _mfp_client(settings), since=m_since, until=until, user_id=settings.user_id
-                )
-                d, w = res["diary"], res["weight"]
-                print(f"    diary   inserted={d['inserted']:4d} skipped={d['skipped']:4d}")
-                print(f"    weight  inserted={w['inserted']:4d} skipped={w['skipped']:4d}")
-        except ConfigError:
-            print("  mfp: not configured — skipped")
-        except MfpAuthError as exc:
-            print(f"  mfp: auth needed ({exc}) — skipped", file=sys.stderr)
-
-        # HealthKit backfill — ONLY when an export path is passed explicitly
-        if args.hk_file:
-            from ..adapters.healthkit.ingest import ingest_healthkit
-
-            export = Path(args.hk_file)
-            if export.exists():
-                res_hk = ingest_healthkit(conn, export, user_id=settings.user_id)
-                print(f"  healthkit: inserted={res_hk['inserted']} skipped={res_hk['skipped']}")
-            else:
-                print(f"  healthkit: export not found: {export}", file=sys.stderr)
-
-        counts = _normalize(conn, user_id=settings.user_id)
-        print("  normalize:", "  ".join(f"{k}={v}" for k, v in counts.items()))
+        result = run_sync(
+            conn,
+            settings,
+            whoop_client=_whoop_client,
+            mfp_client=_mfp_client,
+            today=_today(settings),
+            hk_file=Path(args.hk_file) if args.hk_file else None,
+        )
+        for src in result.sources:
+            if src.skipped:
+                print(f"  {src.name}: {src.skipped} — skipped")
+                continue
+            since = f" (incremental since {src.since})" if src.since else ""
+            print(f"  {src.name}:{since}")
+            for key, c in src.counts.items():
+                if isinstance(c, dict):  # nested per-record-type counts
+                    print(f"    {key:18} inserted={c['inserted']:4d} skipped={c['skipped']:4d}")
+                else:
+                    print(f"    {key:18} {c}")
+        print("  normalize:", "  ".join(f"{k}={v}" for k, v in result.normalized.items()))
     finally:
         conn.close()
     return 0
