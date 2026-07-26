@@ -219,7 +219,7 @@ def run_live_grounding(provider) -> list[dict]:
             sc.seed(conn)
             # scenarios pin their day in the query; anchor "today" just after it
             # so relative phrasing can never wander into empty history
-            res = ask(conn, provider, sc.query, today="2026-05-02")
+            res = ask(conn, provider, sc.query, today="2026-07-01")
             # Ground the fabrication check in what the model was actually GIVEN:
             # replay each successful call (these tools are read-only, so the
             # output is identical) and harvest every number it returned.
@@ -229,7 +229,7 @@ def run_live_grounding(provider) -> list[dict]:
                     continue
                 try:
                     allowed.extend(
-                        numbers_in(dispatch(conn, call.name, call.args, today="2026-05-02"))
+                        numbers_in(dispatch(conn, call.name, call.args, today="2026-07-01"))
                     )
                 except Exception:
                     continue  # scoring must never crash the eval
