@@ -46,3 +46,11 @@ projected timeline, on/off-track delta). Two natural framings:
 - Bulk (gain) rate is **not** clamped here — §8.6 specifies a loss ceiling and a
   calorie floor only; an over-aggressive bulk is out of the current guardrail
   scope and left to the user (documented, not silently unbounded).
+- **Mid-cut adoption.** The forward-looking numbers (daily goal, ETA) key off the
+  *current* trend, so they're correct the moment a plan is set. But a user who
+  already started must be able to **backdate the start anchor** (`plan set
+  --start-date/--start-weight`) or "progress so far" and adherence are
+  meaningless. `plan_status` therefore computes progress (kg changed, actual
+  rate vs target → an `adherence` label) only when a start weight and a positive
+  elapsed span exist; a same-day plan simply shows no progress yet (§2.7, not a
+  fabricated zero).

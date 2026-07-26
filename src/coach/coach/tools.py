@@ -262,6 +262,8 @@ def get_plan_status(
         tdee_kcal=tdee_kcal,
         current_trend_kg=current_trend,
         end_day=end,
+        start_day_key=plan.start_day_key,
+        start_weight_kg=plan.start_weight_kg,
     )
     if isinstance(st, Insufficient):
         return {"end": end, "plan": plan_dict, "status": None, "insufficient": _insufficient(st)}

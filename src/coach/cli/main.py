@@ -385,10 +385,11 @@ def _print_plan_line(settings: Settings, date: str) -> None:
     st = p["status"]
     goal = f" · goal {_fmt(st['goal_weight_kg'], 'kg')}" if st["goal_weight_kg"] is not None else ""
     eta = f" · ETA {st['projected_goal_day']}" if st["projected_goal_day"] else ""
+    adh = f" · {st['adherence'].upper()}" if st["adherence"] is not None else ""
     clamp = "  [floor-clamped]" if st["floor_clamped"] else ""
     print(
         f"  plan [{st['direction']} {st['target_rate_pct_per_week']:+.2f}%/wk]: "
-        f"{st['calorie_goal_kcal']:.0f} kcal/day{goal}{eta}{clamp}"
+        f"{st['calorie_goal_kcal']:.0f} kcal/day{goal}{eta}{adh}{clamp}"
     )
     for a in st["alerts"]:
         print(f"    ⚠ {a['message']}")
@@ -674,6 +675,27 @@ def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
         ).fetchone()
         current_trend = row["trend_kg"] if row else None
 
+        # start anchor — default today/current-trend, but a mid-cut user can
+        # backdate it so progress-so-far and adherence read truthfully.
+        start_day = args.start_date or today
+        start_weight = args.start_weight
+        if start_weight is None and args.start_date:
+            srow = conn.execute(
+                "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
+                "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",
+                (settings.user_id, args.start_date),
+            ).fetchone()
+            start_weight = srow["trend_kg"] if srow else None
+            if start_weight is None:
+                print(
+                    f"No weight trend on/before --start-date {args.start_date}; "
+                    "pass --start-weight to anchor progress explicitly.",
+                    file=sys.stderr,
+                )
+                return 1
+        elif start_weight is None:
+            start_weight = current_trend
+
         note_extra = None
         if args.maintain:
             requested = 0.0
@@ -715,10 +737,10 @@ def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
                 id=plan_id(settings.user_id, created_at),
                 user_id=settings.user_id,
                 created_at=created_at,
-                start_day_key=today,
+                start_day_key=start_day,
                 direction=target.direction,
                 target_rate_pct_per_week=target.rate_pct_per_week,
-                start_weight_kg=current_trend,
+                start_weight_kg=start_weight,
                 goal_weight_kg=args.goal_weight,
                 protein_g_per_kg=args.protein,
                 note=note,
@@ -730,7 +752,7 @@ def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
 
     print(
         f"Plan set: {target.direction} at {target.rate_pct_per_week:+.2f}%/week"
-        + (f" (anchor {current_trend:.2f}kg)" if current_trend is not None else "")
+        + (f" (start {start_weight:.2f}kg @ {start_day})" if start_weight is not None else "")
         + (f", goal {args.goal_weight}kg" if args.goal_weight is not None else "")
     )
     if target.clamped:
@@ -779,6 +801,11 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
     )
     if st["weeks_to_goal"] is not None:
         print(f"  projection:       ~{st['weeks_to_goal']:.1f} weeks → {st['projected_goal_day']}")
+    if st["adherence"] is not None:
+        print(
+            f"  progress:         {st['kg_changed_so_far']:+.2f} kg over {st['elapsed_days']}d "
+            f"({st['actual_rate_kg_per_week']:+.3f} kg/wk actual)  →  {st['adherence'].upper()}"
+        )
     for a in st["alerts"]:
         print(f"  ⚠ {a['message']}")
     return 0
@@ -900,6 +927,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--by", default=None, help="deadline YYYY-MM-DD (with --goal-weight; rate is clamped)"
     )
     p_ps.add_argument("--protein", type=float, default=None, help="protein floor g/kg (optional)")
+    p_ps.add_argument(
+        "--start-date", default=None,
+        help="backdate the plan start YYYY-MM-DD (already mid-cut); anchors progress",
+    )
+    p_ps.add_argument(
+        "--start-weight", type=float, default=None,
+        help="start weight in kg (defaults to the trend at --start-date, else today's trend)",
+    )
     p_ps.add_argument("--maintain", action="store_true", help="maintenance plan (rate 0)")
     p_ps.set_defaults(func=_cmd_plan_set)
     p_pst = plan_sub.add_parser("status", help="daily calorie goal + projection for the active plan")

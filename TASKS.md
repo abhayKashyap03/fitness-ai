@@ -409,13 +409,15 @@ shapes the schema and every downstream number). Sketch, once D5 lands:
   trend, calls `plan_status`; fired Alerts surfaced verbatim; registered in `TOOLS`.
   Now the 7th coach tool — `coach ask` can reason about adherence.
 - [x] **T7.3 — CLI** — `coach plan set (--rate | --goal-weight --by | --maintain)
-  [--protein]` and `coach plan status [--end --window --json]`; `coach status`
-  gained a plan line. `plan set` clamps the rate at set time, anchors start weight
-  from the trend. Smoke-verified: rate/deadline/maintain, clamp fires, insufficient
-  degrades honestly.
-- [x] **T7.4 — tests** — 19 in `test_plan.py`: hand-checked target math, guardrail
-  clamps, deadline→rate, timeline projection, persistence (supersede + CHECK), and
-  the tool's DB-assembly + insufficient paths. **323 tests green; ruff + mypy clean.**
+  [--protein] [--start-date --start-weight]` and `coach plan status [--end --window
+  --json]`; `coach status` gained a plan line. `plan set` clamps the rate at set
+  time and anchors start weight from the trend. Smoke-verified: rate/deadline/
+  maintain, clamp fires, backdated anchor, insufficient degrades honestly.
+- [x] **T7.4 — already-started support + adherence** — a mid-cut user can backdate
+  the start (`--start-date`/`--start-weight`); `plan_status` then reports progress
+  (kg changed, actual rate vs target → `adherence` label: on_track/ahead/behind/
+  wrong_way). A same-day plan shows no progress yet (§2.7, not a zero). 26 tests in
+  `test_plan.py`. **328 tests green; ruff + mypy clean.**
 - [ ] **T7.5 — LIVE verify (human)** — on the real DB: `coach plan set --rate -0.5
   --goal-weight <kg>` → `coach plan status` (needs ≥10 logged-intake days + a weight
   trend for a real goal) → check the plan line in `coach status`. Then let the coach

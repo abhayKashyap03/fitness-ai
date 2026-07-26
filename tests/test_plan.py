@@ -13,6 +13,7 @@ from coach.compute.guardrails import (
     clamp_target_loss_rate,
 )
 from coach.compute.plan import (
+    adherence_label,
     direction_for_rate,
     plan_status,
     rate_from_deadline,
@@ -177,6 +178,63 @@ def test_plan_status_maintain_no_projection_even_with_goal():
     assert st.daily_kcal_delta == pytest.approx(0.0)
     assert st.calorie_goal_kcal == pytest.approx(2500.0)
     assert st.weeks_to_goal is None
+
+
+# ---- adherence (the "already started" case) --------------------------------
+
+
+def test_adherence_label_on_track_ahead_behind():
+    # target -0.4 kg/wk (a cut)
+    assert adherence_label(-0.40, -0.40) == "on_track"
+    assert adherence_label(-0.60, -0.40) == "ahead"  # losing faster
+    assert adherence_label(-0.20, -0.40) == "behind"  # losing slower
+
+
+def test_adherence_label_wrong_way_when_gaining_during_cut():
+    assert adherence_label(0.30, -0.40) == "wrong_way"
+
+
+def test_adherence_label_maintain_band():
+    assert adherence_label(0.10, 0.0) == "on_track"
+    assert adherence_label(0.40, 0.0) == "wrong_way"
+
+
+def test_plan_status_backdated_start_shows_progress_and_adherence():
+    # started 80kg on 2026-06-26, now 78.4kg on 2026-07-26 (30 days)
+    # target -0.5%/wk of 78.4 = -0.392 kg/wk; actual = -1.6kg/30d*7 = -0.373 kg/wk
+    st = plan_status(
+        direction="cut",
+        target_rate_pct_per_week=-0.5,
+        goal_weight_kg=76.0,
+        tdee_kcal=2500.0,
+        current_trend_kg=78.4,
+        end_day="2026-07-26",
+        start_day_key="2026-06-26",
+        start_weight_kg=80.0,
+    )
+    assert not isinstance(st, Insufficient)
+    assert st.elapsed_days == 30
+    assert st.kg_changed_so_far == pytest.approx(-1.6)
+    assert st.actual_rate_kg_per_week == pytest.approx(-0.3733, abs=1e-3)
+    assert st.adherence == "on_track"  # within 25% of target
+
+
+def test_plan_status_same_day_plan_has_no_progress():
+    # plan set today: start == end, so nothing to show yet (§2.7, not a zero)
+    st = plan_status(
+        direction="cut",
+        target_rate_pct_per_week=-0.5,
+        goal_weight_kg=None,
+        tdee_kcal=2500.0,
+        current_trend_kg=80.0,
+        end_day="2026-07-26",
+        start_day_key="2026-07-26",
+        start_weight_kg=80.0,
+    )
+    assert not isinstance(st, Insufficient)
+    assert st.elapsed_days is None
+    assert st.actual_rate_kg_per_week is None
+    assert st.adherence is None
 
 
 # ---- persistence ------------------------------------------------------------
