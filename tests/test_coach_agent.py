@@ -203,8 +203,8 @@ def seeded_conn(migrated_conn):
 
 
 def test_build_provider_defaults():
-    assert build_provider("google", "k").model == "gemini-2.5-flash"
-    assert build_provider("anthropic", "k").model == "claude-opus-4-8"
+    assert build_provider("google", "k").model == "gemini-3.6-flash"
+    assert build_provider("anthropic", "k").model == "claude-sonnet-5"
 
 
 def test_build_provider_model_override():
@@ -298,7 +298,7 @@ def test_google_key_in_header_not_url():
     GoogleProvider("secret", transport=tr).complete(system="s", turns=[], tools=[])
     assert tr.headers[0]["x-goog-api-key"] == "secret"
     assert "secret" not in tr.urls[0]  # never a query param
-    assert "gemini-2.5-flash:generateContent" in tr.urls[0]
+    assert f"{GoogleProvider('k').model}:generateContent" in tr.urls[0]
 
 
 def test_google_system_instruction_and_roles():

@@ -32,6 +32,22 @@ from .trends import Insufficient
 # Below this many pairs a correlation is anecdote, not measurement.
 MIN_PAIRS = 14
 
+# Verdict thresholds (deterministic, §2.2 — the answer is code, not model or
+# human judgment). Deliberately conservative: HRV must clear a real bar to be
+# called signal, because the whole point is to test the differentiator honestly
+# (risk #6), not to flatter it.
+#   * autocorrelation this high means today's reading carries real information
+#     about tomorrow's (a pure-noise series sits near 0).
+MIN_AUTOCORR = 0.30
+#   * at least one deviation->next-day correlation this strong means HRV
+#     deviation tracks something a coach could act on.
+MIN_DEV_CORR = 0.20
+
+# Verdict labels.
+SIGNAL = "signal"          # HRV clears both bars — worth informing coaching
+NOISE = "noise"            # enough data, bars not cleared — indistinguishable
+INSUFFICIENT = "insufficient"  # not enough paired days to judge either way
+
 
 @dataclass(frozen=True)
 class Correlation:
@@ -137,6 +153,49 @@ def _daily(conn: sqlite3.Connection, sql: str, args: tuple) -> dict[str, float]:
     }
 
 
+def hrv_verdict(
+    autocorr: Correlation | Insufficient,
+    dev_correlations: list[Correlation | Insufficient],
+) -> tuple[str, str]:
+    """Deterministic signal/noise call from the computed stats (§2.2).
+
+    Returns ``(verdict, one-line rationale)``. The verdict is driven entirely by
+    the real numbers against fixed thresholds — no static "it's noisy" string,
+    no model judgment:
+
+      * INSUFFICIENT — the autocorrelation itself couldn't be measured (too few
+        paired days). Can't judge either way; get more data.
+      * SIGNAL — today's HRV predicts tomorrow's (autocorr >= MIN_AUTOCORR) AND
+        at least one deviation->next-day correlation clears MIN_DEV_CORR. Both
+        bars: HRV is both stable enough to trust and predictive of something.
+      * NOISE — enough data, bars not cleared. Indistinguishable from noise on
+        THIS user's history (the honest null result risk #6 warns about).
+    """
+    if isinstance(autocorr, Insufficient):
+        return INSUFFICIENT, (
+            f"only {autocorr.have} consecutive-day HRV pairs; need "
+            f"{autocorr.needed} to judge."
+        )
+    measured = [c for c in dev_correlations if isinstance(c, Correlation)]
+    strongest = max((abs(c.r) for c in measured), default=0.0)
+    ac = abs(autocorr.r)
+
+    if ac >= MIN_AUTOCORR and strongest >= MIN_DEV_CORR:
+        return SIGNAL, (
+            f"autocorrelation {autocorr.r:+.2f} (>= {MIN_AUTOCORR}) and a "
+            f"next-day correlation of {strongest:.2f} (>= {MIN_DEV_CORR}) — HRV "
+            "carries actionable signal here."
+        )
+    reasons = []
+    if ac < MIN_AUTOCORR:
+        reasons.append(f"autocorrelation {autocorr.r:+.2f} < {MIN_AUTOCORR}")
+    if strongest < MIN_DEV_CORR:
+        reasons.append(f"best next-day correlation {strongest:.2f} < {MIN_DEV_CORR}")
+    return NOISE, (
+        "indistinguishable from noise on your data (" + "; ".join(reasons) + ")."
+    )
+
+
 @dataclass(frozen=True)
 class HrvValidationReport:
     window_days: int
@@ -145,6 +204,8 @@ class HrvValidationReport:
     hrv_lag1_autocorr: Correlation | Insufficient
     dev_vs_next_score: Correlation | Insufficient
     dev_vs_next_strain: Correlation | Insufficient
+    verdict: str = NOISE
+    rationale: str = ""
 
 
 def hrv_validation_report(
@@ -181,11 +242,17 @@ def hrv_validation_report(
     )
 
     dev = deviation_series(hrv)
+    autocorr = lag1_autocorrelation(hrv)
+    dev_score = pearson(*lagged_pairs(dev, score, lag_days=1))
+    dev_strain = pearson(*lagged_pairs(dev, strain, lag_days=1))
+    verdict, rationale = hrv_verdict(autocorr, [dev_score, dev_strain])
     return HrvValidationReport(
         window_days=window,
         hrv_days=len(hrv),
         hrv_cv=coefficient_of_variation(list(hrv.values())),
-        hrv_lag1_autocorr=lag1_autocorrelation(hrv),
-        dev_vs_next_score=pearson(*lagged_pairs(dev, score, lag_days=1)),
-        dev_vs_next_strain=pearson(*lagged_pairs(dev, strain, lag_days=1)),
+        hrv_lag1_autocorr=autocorr,
+        dev_vs_next_score=dev_score,
+        dev_vs_next_strain=dev_strain,
+        verdict=verdict,
+        rationale=rationale,
     )
