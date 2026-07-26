@@ -81,3 +81,46 @@ def test_live_runner_propagates_api_errors():
     provider = build_provider("google", "fake-key", transport=failing_transport)
     with pytest.raises(ApiError):
         run_live_grounding(provider)
+
+
+# ---- fabrication scoring must not punish faithful restatement --------------
+
+
+def test_prose_dates_are_not_fabrications():
+    from coach.coach.grounding import fabricated_numbers as fab
+
+    # "May 1, 2026" tripped the old checker on the bare "1" (live eval false FAIL)
+    assert fab("You did not log any food for May 1, 2026.", allowed=[]) == []
+    assert fab("Nothing logged on 1 May 2026.", allowed=[]) == []
+    assert fab("No data for May 1st.", allowed=[]) == []
+    assert fab("Your recovery on 2026-05-01 is missing.", allowed=[]) == []
+    # a real invented measurement still gets caught
+    assert fab("On May 1, 2026 your HRV was 45 ms.", allowed=[]) == ["45"]
+
+
+def test_numbers_in_harvests_nested_tool_output():
+    from coach.coach.grounding import numbers_in
+
+    payload = {
+        "window": 14,
+        "estimate": None,
+        "insufficient": {"have": 0, "needed": 10},
+        "series": [{"kcal": 1370.5}],
+        "logged": False,  # bool must NOT count as the number 0/1
+    }
+    got = sorted(numbers_in(payload))
+    assert got == [0.0, 10.0, 14.0, 1370.5]
+
+
+def test_insufficient_markers_quoted_back_are_grounded():
+    """The live eval's false FAIL: the model quoted the tool's own 14/10/0."""
+    from coach.coach.grounding import fabricated_numbers as fab
+    from coach.coach.grounding import numbers_in
+
+    tool_out = {"window": 14, "insufficient": {"have": 0, "needed": 10}}
+    answer = (
+        "I don't have enough logged nutrition data to estimate your TDEE over the "
+        "last 14 days. It requires at least 10 days of logged food intake, but you "
+        "currently have 0 days logged."
+    )
+    assert fab(answer, allowed=numbers_in(tool_out)) == []

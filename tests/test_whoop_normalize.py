@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from coach.adapters.whoop.sport_map import whoop_sport_to_canonical
-from coach.normalize.whoop import parse_recovery, parse_workout
+from coach.normalize.whoop import parse_recovery, parse_sleep, parse_workout
 
 FIX = Path(__file__).parent / "fixtures" / "whoop"
 
@@ -124,3 +124,52 @@ def test_workout_unscored_has_null_metrics():
     assert row.strain is None
     assert row.kcal_total is None
     assert row.sport_type == "swim"
+
+
+# ---- sleep (migration 0009 slice) ------------------------------------------
+
+
+def test_sleep_full_night_parses_with_local_day_key():
+    rec = _load("sleep_page1.synthetic.json")["records"][0]
+    row = parse_sleep(rec)
+    assert row is not None
+    # end 14:32Z at -04:00 => local 10:32 on 06-01: the day the sleep serves
+    assert row.day_key == "2026-06-01"
+    assert row.is_nap == 0
+    assert row.utc_offset == "-04:00"
+    assert row.tz_name is None  # offset-only source (§2.6)
+    # milli -> minutes, hand-checked
+    assert row.in_bed_min == 510.0        # 30_600_000 ms
+    assert row.sws_min == 105.0           # 6_300_000 ms
+    assert row.rem_min == 120.0
+    assert row.awake_min == 45.0
+    assert row.sleep_cycle_count == 5
+    assert row.disturbance_count == 9
+    assert row.respiratory_rate == 16.25
+    assert row.need_baseline_min == 460.0  # 27_600_000 ms
+    assert row.performance_pct == 91.0
+    assert row.score_method == "whoop_proprietary"
+    assert row.is_official == 1
+
+
+def test_sleep_nap_flagged_and_null_scores_stay_null():
+    rec = _load("sleep_page1.synthetic.json")["records"][1]
+    row = parse_sleep(rec)
+    assert row is not None
+    assert row.is_nap == 1
+    assert row.rem_min == 0.0              # reported zero IS zero
+    assert row.performance_pct is None     # reported null stays null (§2.7)
+    assert row.consistency_pct is None
+    assert row.efficiency_pct == 88.0
+
+
+def test_sleep_unscored_returns_none():
+    rec = _load("sleep_page1.synthetic.json")["records"][2]
+    assert parse_sleep(rec) is None
+
+
+def test_sleep_missing_id_or_times_returns_none():
+    base = _load("sleep_page1.synthetic.json")["records"][0]
+    assert parse_sleep({**base, "id": None}) is None
+    assert parse_sleep({**base, "start": None}) is None
+    assert parse_sleep({**base, "end": ""}) is None

@@ -12,7 +12,7 @@ import sqlite3
 
 from ..normalize.healthkit import WeightPartial
 from ..normalize.myfitnesspal import FoodEntryRow
-from ..normalize.whoop import RecoveryRow, WorkoutRow
+from ..normalize.whoop import RecoveryRow, SleepRow, WorkoutRow
 
 
 def recovery_id(row: RecoveryRow) -> str:
@@ -138,6 +138,58 @@ def upsert_weight(
     return wid
 
 
+def sleep_id(row: SleepRow) -> str:
+    return f"slp:{row.user_id}:{row.source}:{row.external_id}"
+
+
+def upsert_sleep(
+    conn: sqlite3.Connection, row: SleepRow, *, raw_ref: str, derived_at: str
+) -> str:
+    sid = sleep_id(row)
+    conn.execute(
+        "INSERT OR REPLACE INTO sleep (id, user_id, day_key, source, external_id, "
+        "is_nap, start_at, end_at, tz_name, utc_offset, in_bed_min, awake_min, "
+        "light_min, sws_min, rem_min, no_data_min, sleep_cycle_count, "
+        "disturbance_count, respiratory_rate, need_baseline_min, need_from_debt_min, "
+        "need_from_strain_min, need_from_nap_min, performance_pct, consistency_pct, "
+        "efficiency_pct, score_method, is_official, raw_ref, derived_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            sid,
+            row.user_id,
+            row.day_key,
+            row.source,
+            row.external_id,
+            row.is_nap,
+            row.start_at,
+            row.end_at,
+            row.tz_name,
+            row.utc_offset,
+            row.in_bed_min,
+            row.awake_min,
+            row.light_min,
+            row.sws_min,
+            row.rem_min,
+            row.no_data_min,
+            row.sleep_cycle_count,
+            row.disturbance_count,
+            row.respiratory_rate,
+            row.need_baseline_min,
+            row.need_from_debt_min,
+            row.need_from_strain_min,
+            row.need_from_nap_min,
+            row.performance_pct,
+            row.consistency_pct,
+            row.efficiency_pct,
+            row.score_method,
+            row.is_official,
+            raw_ref,
+            derived_at,
+        ),
+    )
+    return sid
+
+
 def food_id(row: FoodEntryRow) -> str:
     """Deterministic id from the MFP diary-item id (or its positional fallback).
 
@@ -214,5 +266,14 @@ def canonical_fingerprint(conn: sqlite3.Connection) -> str:
         "description,quantity,unit,kcal,protein_g,carbs_g,fat_g,fiber_g,alcohol_g,raw_ref"
     )
     for r in conn.execute(f"SELECT {food_cols} FROM food_entry ORDER BY id"):
+        parts.append("|".join("" if v is None else str(v) for v in r))
+    slp_cols = (
+        "id,user_id,day_key,source,external_id,is_nap,start_at,end_at,tz_name,utc_offset,"
+        "in_bed_min,awake_min,light_min,sws_min,rem_min,no_data_min,sleep_cycle_count,"
+        "disturbance_count,respiratory_rate,need_baseline_min,need_from_debt_min,"
+        "need_from_strain_min,need_from_nap_min,performance_pct,consistency_pct,"
+        "efficiency_pct,score_method,is_official,raw_ref"
+    )
+    for r in conn.execute(f"SELECT {slp_cols} FROM sleep ORDER BY id"):
         parts.append("|".join("" if v is None else str(v) for v in r))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()

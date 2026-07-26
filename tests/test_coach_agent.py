@@ -187,6 +187,27 @@ def test_retries_exhausted_raises(script):
         script.build(tr).complete(system="s", turns=[], tools=[])
 
 
+def test_google_honors_json_retry_delay_from_429_body():
+    # Gemini free-tier 429s carry the wait in the JSON body (RetryInfo /
+    # message), never a Retry-After header — the provider must honor it
+    slept: list[float] = []
+    body_429 = {
+        "error": {
+            "code": 429,
+            "message": "You exceeded your current quota. Please retry in 54.1s.",
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "54s"}
+            ],
+        }
+    }
+    tr = FakeTransport([(429, body_429), GoogleScript.text("ok")])
+    provider = GoogleProvider("k", transport=tr, sleep=slept.append)
+    resp = provider.complete(system="s", turns=[], tools=[])
+    assert resp.stop_reason == "end_turn"
+    assert slept == [55.0]  # RetryInfo's 54s + 1s cushion, not exponential 1s
+
+
 def test_error_message_never_contains_the_key():
     tr = FakeTransport([(401, {"error": {"type": "auth", "message": "bad key"}})])
     provider = AnthropicProvider("SUPER-SECRET-KEY", transport=tr, sleep=lambda _s: None)
@@ -303,6 +324,22 @@ def test_ask_tool_round_executes_and_feeds_back(seeded_conn, script):
     # the second request carried REAL tool output back to the model
     sent = json.dumps(tr.requests[1])
     assert "healthkit" in sent  # the weigh-in provenance made the round trip
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)
+def test_ask_today_reaches_system_prompt_and_fills_omitted_dates(seeded_conn, script):
+    # the model has no clock (a live Gemini run guessed 2023): the caller's
+    # `today` must land in the system prompt AND fill an omitted end/date
+    tr = FakeTransport(
+        [script.tool("get_weight_trend", {"window": 7}), script.text("ok")]
+    )
+    res = ask(seeded_conn, script.build(tr), "how's my weight?", today=WEIGH_DAY)
+    assert res.text == "ok"
+    assert WEIGH_DAY in json.dumps(tr.requests[0])  # date visible to the model
+    # tool ran against today's anchor, not a crash on missing `end`
+    assert res.tool_calls[0].ok
+    sent = json.dumps(tr.requests[1])
+    assert WEIGH_DAY in sent  # tool result window anchored on today
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)

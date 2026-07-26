@@ -23,7 +23,7 @@ from .base import (
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-opus-4-8"
+DEFAULT_MODEL = "claude-sonnet-5"
 
 # Anthropic-specific transient statuses (529 = overloaded).
 _RETRYABLE = frozenset({429, 500, 529})

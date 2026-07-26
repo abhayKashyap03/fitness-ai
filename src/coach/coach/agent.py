@@ -59,6 +59,7 @@ def _run_tools(
     *,
     user_id: int,
     calls: list[ToolCall],
+    today: str | None = None,
 ) -> list[ToolResult]:
     """Execute every requested tool; return canonical results.
 
@@ -68,7 +69,7 @@ def _run_tools(
     results: list[ToolResult] = []
     for use in uses:
         try:
-            payload = dispatch(conn, use.name, use.args, user_id=user_id)
+            payload = dispatch(conn, use.name, use.args, user_id=user_id, today=today)
             results.append(ToolResult(use.id, use.name, payload))
             calls.append(ToolCall(use.name, use.args, True))
         except Exception as exc:
@@ -84,15 +85,30 @@ def ask(
     *,
     user_id: int = 1,
     max_rounds: int = MAX_ROUNDS,
+    today: str | None = None,
 ) -> AgentResult:
-    """Answer one coaching question, grounded in tool results."""
+    """Answer one coaching question, grounded in tool results.
+
+    ``today`` is the caller-computed current day_key (COACH_HOME_TZ, §2.6). The
+    model has no reliable clock — a live run without it had Gemini guessing a
+    training-era date and querying empty windows — so the real date is injected
+    into the system prompt AND filled server-side into any tool call whose day
+    anchor the model omits (§2.2: code computes, including the calendar).
+    """
+    system = SYSTEM_PROMPT
+    if today is not None:
+        system = (
+            f"{SYSTEM_PROMPT}\n\nToday's date is {today}. Never guess dates: "
+            "for questions about now/today/currently, OMIT the end/date tool "
+            "argument (the server fills the current date) or use this date."
+        )
     turns: list[Turn] = [UserTurn(question)]
     tools = tool_specs()
     calls: list[ToolCall] = []
     usage = Usage()
 
     for round_n in range(1, max_rounds + 1):
-        resp = provider.complete(system=SYSTEM_PROMPT, turns=turns, tools=tools)
+        resp = provider.complete(system=system, turns=turns, tools=tools)
         usage = usage + resp.usage
 
         if resp.stop_reason == "refusal":
@@ -108,7 +124,9 @@ def ask(
             turns.append(AssistantTurn(resp.native))
             turns.append(
                 ToolResultTurn(
-                    _run_tools(conn, resp.tool_uses, user_id=user_id, calls=calls)
+                    _run_tools(
+                        conn, resp.tool_uses, user_id=user_id, calls=calls, today=today
+                    )
                 )
             )
             continue

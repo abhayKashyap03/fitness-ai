@@ -50,7 +50,117 @@ step." Budget noted: ~9 h / $60. Each step below is one commit, in order.
   the explicit backfill command are the only remainders (both correct).
   README has none (it predates all of this; refreshed in a later step).
 
-### READ THIS FIRST (wake-up summary)
+## Session 2026-07-25 (b) — sleep slice, live verification, review fixes (branch `feat/session4-sleep-calibration`)
+
+Branch created off main FIRST this time (see the violation note below). All work
+below is on `feat/session4-sleep-calibration`, unpushed → PR pending.
+
+**Live credentials were available for this session**, so several long-standing
+"unverified" items are now verified against the real install and real APIs.
+
+### Step 1 — `e81a417` fix(coach): the model has no clock
+The first-ever live `coach ask` immediately exposed a real defect: Gemini
+guessed a training-era date (`end=2023-11-20`), queried empty windows, and
+honestly reported "no data" — right answer, wrong world. §2.2 ("code computes")
+extends to the calendar:
+- `agent.ask(today=...)` appends the real date (COACH_HOME_TZ, §2.6) to the
+  system prompt and instructs the model to OMIT date args for "now".
+- Every tool's `end`/`date` is now optional; `dispatch(today=...)` fills the
+  real current day_key server-side when omitted. An explicit model date still
+  wins (tested both ways).
+- Re-tested live: model omitted dates, tools anchored on today, answer grounded
+  in the real 83.14 kg trend, with a Gemini prompt-cache hit.
+- Also swapped the MFP weight fixture to the LIVE-VERIFIED shape (`items` LIST,
+  `type: "Weight"` capital-W, `has_more`/`total_entries` envelope) — the live
+  run proved the normalizer already tolerated it.
+
+### Step 2 — `105e4bd` fix(llm): honor Gemini's JSON retry hint
+`coach eval grounding` died on RESOURCE_EXHAUSTED. Cause: the free tier caps
+gemini-2.5-flash at 20 req/min and Gemini puts the wait in the error BODY
+(`error.details[].retryDelay`, and the message text) — never a `Retry-After`
+header, which is all the base class knew how to read. Exponential backoff
+exhausted its retries inside the quota window. `base._retry_delay` now receives
+the error body; `GoogleProvider` parses the hint (+1 s cushion, capped 90 s).
+
+### Step 3 — `886a8ce` feat(sleep): canonical sleep table (migration 0009, schema v9)
+Sleep was raw-ingested from day one but only `respiratory_rate` ever reached
+canonical. This promotes the full record — the last §1 data type without a home:
+- Objective stage durations (in-bed/light/SWS/REM/awake minutes, cycle +
+  disturbance counts, respiratory rate) are cross-source **calibration
+  currency** for Adapter B; composite percentages carry `score_method` +
+  `is_official` because WHOOP's weighting is proprietary (§5).
+- One row per sleep SESSION; naps are sibling rows flagged `is_nap`;
+  `day_key` = the local day the sleep ENDED (the day it serves).
+  `sleep_resolved` view picks one authoritative NIGHT sleep per day.
+- Field names verified against BOTH the live raw payloads in the real DB and
+  developer.whoop.com; the fixture was upgraded from a 2-field stub to the full
+  real shape (night + nap + unscored records).
+- LIVE: 103 sleep sessions canonicalized; `coach status` now shows recovery +
+  sleep + weight + food together — the §1 thesis on one screen.
+- **Rebuild proven byte-identical on the REAL database** (fingerprint unchanged
+  across `normalize --rebuild`), not just on fixtures.
+
+### Step 4 — `f1a8922` feat(calibration): cross-source agreement stats
+The machinery ADR-0012's time-sliced calibration play will need: per-metric
+mean bias, MAE, and correlation of source B against reference source A over the
+days both reported. Pairs only shared days (§2.7 — no interpolation);
+Insufficient below 14 shared days. Objective metrics only — the composite score
+is excluded by whitelist (proprietary weighting isn't comparable, §5), which
+also keeps the metric name out of SQL unless validated.
+
+### Step 5 — `28660f2` fix(secrets): namespace token files by user_id
+An external review (Gemini) caught a **real bug**: `.credentials/*.json` were
+global, so a second user authorizing WHOOP would silently overwrite the first
+user's refresh token. Tokens now live in `.credentials/u<user_id>/`; a legacy
+global file is transparently MOVED on first access (never copied — no stale
+duplicate secret; never deleted). LIVE-VERIFIED: both real tokens adopted into
+`u1/`, then a real WHOOP ingest (including an OAuth auto-refresh through the
+moved file) and a real MFP ingest both succeeded.
+*Same review's "Python 3.14 runtime floor" finding was checked and is **not**
+real — `requires-python = ">=3.11"`; only ruff/mypy `target-version` tracks
+3.14, which is the documented §3 policy.*
+
+### Step 6 — `f68634b` refactor(sync): extract orchestration into a service seam
+`_cmd_sync` mixed domain logic (which sources run, how each degrades) with
+`print()`. Any future non-CLI caller would have had to reimplement it. Now
+`services/sync.py::run_sync()` returns a `SyncResult` and the CLI only formats
+it — the same layering as compute → tools → CLI. Clients are injected, so the
+orchestration tests run with zero credentials. The degradation contract is now
+explicit and tested: one dead source never costs you the others. No server, no
+framework, nothing speculative added (§11).
+
+### Step 7 — `8ecaa52` fix(eval): the grounding scorer cried wolf
+With the retry fix in, `coach eval grounding` finally RAN — and reported 0/3
+passed. Every failure was a false positive; the model had answered perfectly:
+- `fabricated=['14','10','0']` were the tool's OWN window and insufficient
+  markers, quoted back ("needs 10 days, you have 0").
+- `fabricated=['1']` was the "1" in "May 1, 2026" — the stripper only knew ISO
+  dates.
+
+This mattered more than it looks: a zero-fabrication guard that fails on
+correct answers gets ignored, quietly retiring the project's #1 differentiator.
+Fixes: strip prose dates too, and derive the `allowed` set from what the model
+was actually GIVEN (the runner replays each successful tool call — read-only,
+identical output — and harvests every nested number). Faithfully restating a
+tool's insufficient-data counts is grounded behavior; an invented measurement
+is still caught (tested both ways). Bools can't launder a 0.
+
+### Verified live this session (previously unverified)
+- `coach ask` end-to-end on real data (Gemini free tier) ✓
+- `coach sync` end-to-end through the new service layer (WHOOP + MFP) ✓
+- MFP weight response shape ✓ · WHOOP sleep payload shape ✓
+- Byte-identical `--rebuild` on the real 500+-row raw store ✓
+- Token namespacing migration on the live install ✓
+
+### Still not verified
+- `coach eval grounding` full pass — repeatedly blocked by the free-tier
+  20 req/min quota (the retry fix helps within a run, but the eval fires many
+  calls back to back). Re-run when quota is fresh.
+- BLE hardware spike (needs the strap; ADR-0012's acceptance gate).
+
+---
+
+### READ THIS FIRST (wake-up summary — 2026-07-25 overnight run)
 
 ⚠️ **PROCESS VIOLATION, MY FAULT:** you merged PR #11 before sleeping, which
 left the repo on `main` — and I committed tonight's 6 commits **directly to

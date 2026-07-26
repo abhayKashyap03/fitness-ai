@@ -46,6 +46,16 @@ class FoodSummary:
 
 
 @dataclass(frozen=True)
+class SleepSummary:
+    source: str
+    in_bed_min: float | None
+    sws_min: float | None
+    rem_min: float | None
+    efficiency_pct: float | None
+    performance_pct: float | None
+
+
+@dataclass(frozen=True)
 class TrainingSummary:
     sessions: int  # distinct real sessions (grouped)
     kcal_active: float | None
@@ -58,6 +68,7 @@ class DailyStatus:
     day_key: str
     user_id: int
     recovery: RecoverySummary | None
+    sleep: SleepSummary | None
     weight: WeightSummary | None
     food: FoodSummary
     training: TrainingSummary
@@ -73,6 +84,20 @@ def _recovery(conn: sqlite3.Connection, day: str, uid: int) -> RecoverySummary |
     if r is None:
         return None
     return RecoverySummary(r["source"], r["score"], r["hrv_rmssd_ms"], r["resting_hr_bpm"])
+
+
+def _sleep(conn: sqlite3.Connection, day: str, uid: int) -> SleepSummary | None:
+    r = conn.execute(
+        "SELECT source, in_bed_min, sws_min, rem_min, efficiency_pct, performance_pct "
+        "FROM sleep_resolved WHERE user_id=? AND day_key=?",
+        (uid, day),
+    ).fetchone()
+    if r is None:
+        return None
+    return SleepSummary(
+        r["source"], r["in_bed_min"], r["sws_min"], r["rem_min"],
+        r["efficiency_pct"], r["performance_pct"],
+    )
 
 
 def _weight(conn: sqlite3.Connection, day: str, uid: int) -> WeightSummary | None:
@@ -149,12 +174,15 @@ def _training(conn: sqlite3.Connection, day: str, uid: int) -> TrainingSummary:
 def daily_status(conn: sqlite3.Connection, day_key: str, user_id: int = 1) -> DailyStatus:
     food = _food(conn, day_key, user_id)
     recovery = _recovery(conn, day_key, user_id)
+    sleep = _sleep(conn, day_key, user_id)
     weight = _weight(conn, day_key, user_id)
     training = _training(conn, day_key, user_id)
 
     notes: list[str] = []
     if recovery is None:
         notes.append("no recovery data for this day")
+    if sleep is None:
+        notes.append("no sleep recorded ending this day")
     if weight is None:
         notes.append("no weight logged this day")
     if not food.logged:
@@ -169,6 +197,7 @@ def daily_status(conn: sqlite3.Connection, day_key: str, user_id: int = 1) -> Da
         day_key=day_key,
         user_id=user_id,
         recovery=recovery,
+        sleep=sleep,
         weight=weight,
         food=food,
         training=training,

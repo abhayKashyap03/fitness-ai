@@ -18,6 +18,8 @@ Vendor shapes that stop at this boundary (§2.5):
 
 from __future__ import annotations
 
+import re
+
 from .base import (
     AssistantTurn,
     HttpProviderBase,
@@ -75,6 +77,27 @@ class GoogleProvider(HttpProviderBase):
         super().__init__(**kw)
         self._api_key = api_key
         self.model = model or DEFAULT_MODEL
+
+    def _retry_delay(self, attempt: int, headers: dict[str, str], data: dict) -> float:
+        """Honor Gemini's JSON retry hint (free-tier 429s carry it in the BODY).
+
+        Gemini sends no Retry-After header; the wait lives in
+        ``error.details[].retryDelay`` ("54s") and/or the message text
+        ("Please retry in 54.1s"). Without this, the base exponential backoff
+        (capped well under a minute-window quota reset) exhausts its retries
+        too early and a free-tier burst kills the whole eval run.
+        """
+        err = (data or {}).get("error") or {}
+        for d in err.get("details") or []:
+            delay = d.get("retryDelay")
+            if isinstance(delay, str):
+                m = re.fullmatch(r"([0-9.]+)s", delay.strip())
+                if m:
+                    return min(float(m.group(1)) + 1.0, 90.0)
+        m = re.search(r"retry in ([0-9.]+)s", str(err.get("message", "")))
+        if m:
+            return min(float(m.group(1)) + 1.0, 90.0)
+        return super()._retry_delay(attempt, headers, data)
 
     # -- canonical -> wire ---------------------------------------------------
 

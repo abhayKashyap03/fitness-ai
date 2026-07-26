@@ -40,6 +40,7 @@ def test_tool_specs_shape():
         "get_daily_status",
         "get_weight_trend",
         "get_recovery_history",
+        "get_sleep_history",
         "get_tdee_estimate",
         "get_safety_flags",
     }
@@ -57,6 +58,22 @@ def test_dispatch_unknown_tool_raises(seeded_conn):
 def test_dispatch_routes_to_handler(seeded_conn):
     out = tools.dispatch(seeded_conn, "get_weight_trend", {"end": WEIGH_DAY, "window": 7})
     assert out["series"]  # non-empty
+
+
+def test_dispatch_fills_today_when_day_anchor_omitted(seeded_conn):
+    # the model has no clock — an omitted end/date gets the server-side today
+    out = tools.dispatch(seeded_conn, "get_weight_trend", {"window": 7}, today=WEIGH_DAY)
+    assert out["end"] == WEIGH_DAY
+    assert out["series"]
+    out = tools.dispatch(seeded_conn, "get_daily_status", {}, today=WEIGH_DAY)
+    assert out["day_key"] == WEIGH_DAY
+
+
+def test_dispatch_model_supplied_date_wins_over_today(seeded_conn):
+    out = tools.dispatch(
+        seeded_conn, "get_weight_trend", {"end": "2000-01-01"}, today=WEIGH_DAY
+    )
+    assert out["end"] == "2000-01-01"  # explicit model arg is respected
 
 
 # ---- every tool returns JSON-serializable structured data ------------------
@@ -114,6 +131,13 @@ def test_recovery_history_empty_is_insufficient(seeded_conn):
     out = tools.get_recovery_history(seeded_conn, end=WEIGH_DAY, window=7)
     assert out["series"] == []
     assert out["insufficient"] == {"have": 0, "needed": 1}
+
+
+def test_sleep_history_empty_is_insufficient_and_json_safe(seeded_conn):
+    out = tools.get_sleep_history(seeded_conn, end=WEIGH_DAY, window=7)
+    assert out["series"] == []
+    assert out["insufficient"] == {"have": 0, "needed": 1}
+    assert _json_roundtrips(out)
 
 
 def test_tdee_insufficient_returns_null_estimate_not_a_number(seeded_conn):

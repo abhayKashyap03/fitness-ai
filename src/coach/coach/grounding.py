@@ -88,22 +88,62 @@ def admits_absence(text: str) -> bool:
     return any(p in low for p in _ABSENCE_PATTERNS)
 
 
+_MONTHS = (
+    "january|february|march|april|may|june|july|august|september|october|november|december"
+)
+# "May 1, 2026" / "1 May 2026" / "May 1st" — prose dates, not measurements
+_PROSE_DATE_RE = re.compile(
+    rf"\b(?:{_MONTHS})\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s*\d{{4}})?"
+    rf"|\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{_MONTHS})(?:,?\s*\d{{4}})?",
+    re.IGNORECASE,
+)
+
+
 def fabricated_numbers(text: str, allowed: list[float], *, tol: float = 0.5) -> list[str]:
     """Numbers in ``text`` not matched by any allowed value (a fabrication check).
 
-    Calendar dates (``YYYY-MM-DD``) and bare years are stripped first — an
-    answer restating the asked-about date is not a fabricated measurement.
-    ``tol`` absorbs rounding in prose. Coarse by design; the committed test
-    suite covers the helper, the live eval interprets its output.
+    Calendar dates are stripped first — ISO (``YYYY-MM-DD``), bare years, and
+    PROSE forms ("May 1, 2026") — because an answer restating the asked-about
+    date is not a fabricated measurement. ``tol`` absorbs rounding in prose.
+
+    ``allowed`` must include the numbers the model actually SAW in tool output
+    (window sizes, ``have``/``needed`` markers, measurements). Quoting a tool's
+    own insufficient-data counts back to the user is grounded behavior — the
+    live runner harvests them automatically.
     """
-    scrubbed = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "", text)
-    scrubbed = re.sub(r"\b(19|20)\d{2}\b", "", scrubbed)
+    scrubbed = _PROSE_DATE_RE.sub(" ", text)
+    scrubbed = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", " ", scrubbed)
+    scrubbed = re.sub(r"\b(19|20)\d{2}\b", " ", scrubbed)
     out: list[str] = []
     for tok in _NUMBER_RE.findall(scrubbed):
         val = float(tok)
         if any(abs(val - a) <= tol for a in allowed):
             continue
         out.append(tok)
+    return out
+
+
+def numbers_in(obj: object) -> list[float]:
+    """Every numeric value nested anywhere in a tool result (recursive).
+
+    Used to build the ``allowed`` set from what the model was actually given,
+    so the fabrication check measures INVENTION rather than penalizing faithful
+    restatement of the data.
+    """
+    out: list[float] = []
+    if isinstance(obj, bool):
+        return out
+    if isinstance(obj, int | float):
+        return [float(obj)]
+    if isinstance(obj, dict):
+        for v in obj.values():
+            out.extend(numbers_in(v))
+    elif isinstance(obj, list | tuple):
+        for v in obj:
+            out.extend(numbers_in(v))
+    elif isinstance(obj, str):
+        for tok in _NUMBER_RE.findall(obj):
+            out.append(float(tok))
     return out
 
 
@@ -168,6 +208,7 @@ def run_live_grounding(provider) -> list[dict]:
     """
     from ..store import db as _db
     from .agent import ask
+    from .tools import dispatch
 
     results: list[dict] = []
     for sc in SCENARIOS:
@@ -176,10 +217,25 @@ def run_live_grounding(provider) -> list[dict]:
         try:
             _db.migrate(conn)
             sc.seed(conn)
-            res = ask(conn, provider, sc.query)
+            # scenarios pin their day in the query; anchor "today" just after it
+            # so relative phrasing can never wander into empty history
+            res = ask(conn, provider, sc.query, today="2026-07-01")
+            # Ground the fabrication check in what the model was actually GIVEN:
+            # replay each successful call (these tools are read-only, so the
+            # output is identical) and harvest every number it returned.
+            allowed = list(sc.allowed_numbers)
+            for call in res.tool_calls:
+                if not call.ok:
+                    continue
+                try:
+                    allowed.extend(
+                        numbers_in(dispatch(conn, call.name, call.args, today="2026-07-01"))
+                    )
+                except Exception:
+                    continue  # scoring must never crash the eval
         finally:
             conn.close()
-        fabrications = fabricated_numbers(res.text, sc.allowed_numbers)
+        fabrications = fabricated_numbers(res.text, allowed)
         ok = (not sc.must_admit_absence or admits_absence(res.text)) and not fabrications
         results.append(
             {

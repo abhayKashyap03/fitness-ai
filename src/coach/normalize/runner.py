@@ -11,11 +11,17 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from ..store.canonical import upsert_food, upsert_recovery, upsert_weight, upsert_workout
+from ..store.canonical import (
+    upsert_food,
+    upsert_recovery,
+    upsert_sleep,
+    upsert_weight,
+    upsert_workout,
+)
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
 from .healthkit import parse_body_record
 from .myfitnesspal import parse_diary, parse_measurement
-from .whoop import parse_recovery, parse_workout
+from .whoop import parse_recovery, parse_sleep, parse_workout
 
 
 def _utcnow_iso() -> str:
@@ -72,6 +78,7 @@ def normalize_all(
         conn.execute("DELETE FROM workout")
         conn.execute("DELETE FROM weight_measurement")
         conn.execute("DELETE FROM food_entry")
+        conn.execute("DELETE FROM sleep")
 
     offsets = _cycle_offsets(conn)
     resp_rates = _sleep_resp_rates(conn)
@@ -99,6 +106,16 @@ def normalize_all(
         upsert_workout(conn, wrow, raw_ref=r["id"], derived_at=derived_at)
         n_wk += 1
 
+    n_slp = 0
+    for r in conn.execute(
+        "SELECT id, payload FROM raw_events WHERE source='whoop_api' AND record_type='sleep'"
+    ).fetchall():
+        srow = parse_sleep(json.loads(r["payload"]), user_id=user_id)
+        if srow is None:
+            continue  # unscored/no-id sleeps stay absent (§2.7)
+        upsert_sleep(conn, srow, raw_ref=r["id"], derived_at=derived_at)
+        n_slp += 1
+
     n_wt, n_wt_skipped = _normalize_healthkit_weight(conn, user_id, derived_at)
     n_food = _normalize_mfp_food(conn, user_id, derived_at)
     n_mfp_wt = _normalize_mfp_weight(conn, user_id, derived_at)
@@ -108,6 +125,7 @@ def normalize_all(
     return {
         "recovery": n_rec,
         "workout": n_wk,
+        "sleep": n_slp,
         "weight": n_wt,
         "weight_skipped": n_wt_skipped,
         "mfp_weight": n_mfp_wt,

@@ -314,6 +314,29 @@ scrape ban was **overridden with sign-off** for the user's own account
   (see Blocked section note).
 - [x] **README refresh** — current sources, daily flow, full CLI surface.
 
+## Session-4 (2026-07-25, live credentials available) — branch `feat/session4-sleep-calibration`
+
+- [x] **Live verification pass** — `coach ask`, `coach sync`, MFP weight shape,
+  WHOOP sleep shape, byte-identical `--rebuild` on the REAL DB, token migration.
+- [x] **Model-has-no-clock fix** — today injected into the prompt; server fills
+  omitted date args (a live run had Gemini guessing 2023).
+- [x] **Gemini free-tier retry** — honor the JSON `retryDelay` hint (no
+  Retry-After header exists), which unblocked `eval grounding` entirely.
+- [x] **Sleep canonical slice** — migration 0009 (schema v9), `sleep` +
+  `sleep_resolved`, `parse_sleep`, `get_sleep_history` tool, `coach status`
+  section. 103 real sessions canonicalized.
+- [x] **Calibration stats** — `compute/calibration.py` (bias/MAE/correlation
+  over shared days); wired to whoop_api vs whoop_ble when Adapter B lands.
+- [x] **Credential namespacing** — `.credentials/u<user_id>/`; legacy files
+  adopted transparently. (External-review finding; was a real collision bug.)
+- [x] **Sync service seam** — `services/sync.py::run_sync()` returns data; CLI
+  only formats. Degradation contract tested without credentials.
+- [x] **Grounding scorer fix** — prose dates + tool-derived allowed numbers;
+  the eval was failing correct answers 3/3.
+- [ ] **`coach eval grounding` clean pass** — the scorer is fixed and the eval
+  now runs, but the free tier's 20 req/min quota throttles a full 3-scenario
+  run. Re-run on fresh quota to confirm 3/3.
+
 ## Phase 6B — MyFitnessPal CSV backfill (still valid, secondary)
 
 **Why (2026-07-19c):** the MFP **Privacy Center → "Download My Data"** full export
