@@ -9,11 +9,17 @@ from __future__ import annotations
 import pytest
 
 from coach.compute.hrv_validation import (
+    INSUFFICIENT,
+    MIN_AUTOCORR,
+    MIN_DEV_CORR,
     MIN_PAIRS,
+    NOISE,
+    SIGNAL,
     Correlation,
     coefficient_of_variation,
     deviation_series,
     hrv_validation_report,
+    hrv_verdict,
     lag1_autocorrelation,
     lagged_pairs,
     pearson,
@@ -127,3 +133,66 @@ def test_report_on_empty_db_is_all_insufficient(migrated_conn):
     assert isinstance(rep.hrv_lag1_autocorr, Insufficient)
     assert isinstance(rep.dev_vs_next_score, Insufficient)
     assert isinstance(rep.dev_vs_next_strain, Insufficient)
+
+
+# ---- deterministic verdict (the answer to risk #6) -------------------------
+
+
+def test_verdict_signal_needs_both_bars():
+    # autocorr clears bar AND a dev-correlation clears bar -> SIGNAL
+    v, why = hrv_verdict(
+        Correlation(r=MIN_AUTOCORR + 0.05, n=30),
+        [Correlation(r=MIN_DEV_CORR + 0.05, n=30), Correlation(r=0.0, n=30)],
+    )
+    assert v == SIGNAL
+    assert "actionable" in why
+
+
+def test_verdict_noise_when_autocorr_too_low():
+    # strong next-day correlation but unstable series -> still NOISE
+    v, why = hrv_verdict(
+        Correlation(r=0.10, n=30),
+        [Correlation(r=0.9, n=30)],
+    )
+    assert v == NOISE
+    assert "autocorrelation" in why
+
+
+def test_verdict_noise_when_no_dev_correlation_clears():
+    v, _ = hrv_verdict(
+        Correlation(r=0.8, n=30),
+        [Correlation(r=0.05, n=30), Correlation(r=-0.10, n=30)],
+    )
+    assert v == NOISE
+
+
+def test_verdict_uses_absolute_correlation_both_directions():
+    # a strong NEGATIVE next-day correlation is still signal (direction agnostic)
+    v, _ = hrv_verdict(
+        Correlation(r=-(MIN_AUTOCORR + 0.1), n=30),
+        [Correlation(r=-(MIN_DEV_CORR + 0.1), n=30)],
+    )
+    assert v == SIGNAL
+
+
+def test_verdict_insufficient_when_autocorr_unmeasurable():
+    v, why = hrv_verdict(Insufficient(have=5, needed=MIN_PAIRS), [])
+    assert v == INSUFFICIENT
+    assert "5" in why and str(MIN_PAIRS) in why
+
+
+def test_verdict_insufficient_dev_correlations_are_ignored_not_zeroed():
+    # dev correlation that couldn't be measured must not count as a 0 that
+    # blocks signal — it's simply absent from the max()
+    v, _ = hrv_verdict(
+        Correlation(r=0.9, n=30),
+        [Insufficient(have=2, needed=MIN_PAIRS), Correlation(r=0.5, n=30)],
+    )
+    assert v == SIGNAL
+
+
+def test_report_carries_a_verdict(migrated_conn):
+    rep = hrv_validation_report(migrated_conn, end="2026-03-30", window=90)
+    # empty DB -> autocorr insufficient -> verdict insufficient, never a fake call
+    assert rep.verdict == INSUFFICIENT
+    assert rep.rationale
