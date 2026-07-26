@@ -66,3 +66,37 @@ def test_secrets_not_in_repr():
 def test_relative_db_path_resolved_to_repo_root():
     s = load_settings(env=_base_env(COACH_DB_PATH="./data/x.db"), load_dotenv_file=False)
     assert s.db_path.is_absolute()
+
+
+# ---- LLM provider selection ------------------------------------------------
+
+
+def test_grok_provider_selects_xai_key():
+    s = load_settings(_base_env(COACH_LLM_PROVIDER="grok", XAI_API_KEY="xk"))
+    assert s.llm_provider == "grok"
+    assert s.llm_api_key == "xk"
+    s.require_llm()  # present -> no raise
+
+
+def test_require_llm_names_the_missing_grok_var():
+    s = load_settings(_base_env(COACH_LLM_PROVIDER="grok"))
+    with pytest.raises(ConfigError, match="XAI_API_KEY"):
+        s.require_llm()
+
+
+def test_unknown_provider_rejected_naming_the_valid_set():
+    with pytest.raises(ConfigError, match="grok"):
+        load_settings(_base_env(COACH_LLM_PROVIDER="openai"))
+
+
+def test_xai_key_not_in_repr():
+    s = load_settings(_base_env(COACH_LLM_PROVIDER="grok", XAI_API_KEY="super-secret"))
+    assert "super-secret" not in repr(s)
+
+
+def test_provider_keys_do_not_bleed_across_providers():
+    # a Grok key must not satisfy google, and vice versa
+    s = load_settings(_base_env(COACH_LLM_PROVIDER="google", XAI_API_KEY="xk"))
+    assert s.llm_api_key == ""
+    with pytest.raises(ConfigError, match="GOOGLE_API_KEY"):
+        s.require_llm()
