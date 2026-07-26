@@ -1,503 +1,113 @@
 # Session Log
 
-> Rolling handoff (CLAUDE.md §6.3). Current state + latest session only. Older
+> Rolling handoff (CLAUDE.md §6.3). Current state + latest sessions only. Older
 > sessions → `docs/sessions/`; `git log` is the real history.
 
 ---
 
-## Where the code stands (verified)
+## Where the code stands (verified 2026-07-26)
 
-- Phases 0–5 complete + Phase 4 coach (`ask`) merged. WHOOP slice works **live**.
-  MFP food+weight adapter built, diary shape **live-reconciled**; awaiting live
-  end-to-end run. **230 tests green; ruff + mypy clean.**
-- Schema at **v7** (0006 myfitnesspal food — drops `raw_events.source` CHECK
-  entirely §2.5, widens `food_entry.source`; **0007 myfitnesspal weight** —
-  widens `weight_measurement.source`, ranks MFP below manual). D4/ADR-0009.
-- **`raw_events` rebuild landed WITH sign-off (§8.5)** — row-preserving; proven
-  with FK-linked data (row counts preserved, integrity ok, 0 FK violations).
-  Migration runner now hosts SQLite's 12-step: FK off during a migration, whole-DB
-  `foreign_key_check` before COMMIT (stronger than per-statement enforcement).
-- CLI: `coach db init|status|backup|verify`, `auth whoop`, `ingest whoop`,
-  `ingest healthkit --file`, **`ingest mfp [--since --until]`**, `normalize
-  [--rebuild]`, `status`, `tdee`, `ask`, `eval grounding`, `doctor`, `sync`.
-- **GateGuard disabled** via `.claude/settings.local.json` (`ECC_GATEGUARD=off`)
-  — **user-authorized 2026-07-19; do NOT re-flag** the §8.2 tension. File stays
-  untracked (machine-local).
+- **304 tests green; ruff + mypy clean. Schema at v9** (migrations 0001–0009).
+  On `main` after PRs #12–#14 merged; working tree clean.
+- Phases 0–6A done. WHOOP + MFP (food+weight) run **live**; the coach (`coach
+  ask`) answers grounded questions live. Recovery + sleep + weight + food show
+  together on one `coach status` screen — the §1 thesis, working.
+- **Data types all have a canonical home:** recovery (0001), workout, food
+  (0006), weight/body-comp (0005/0007), sleep (0009). `raw_events` is sacred and
+  append-only; `normalize --rebuild` proven **byte-identical on the real DB**.
+- **LLM layer is provider-agnostic** (§2.5 applied to vendors): Google Gemini
+  (default, free tier), Anthropic, and xAI Grok — each a different wire shape,
+  one module apiece, agent loop vendor-blind. Grounding verified 3/3 on Grok.
+- CLI surface: `db init|status|backup|verify`, `auth whoop`, `ingest
+  whoop|healthkit|mfp`, `normalize [--rebuild]`, `status`, `tdee`, `ask`,
+  `eval grounding|hrv`, `doctor`, `sync`.
+- **GateGuard disabled** via `.claude/settings.local.json` — **user-authorized
+  2026-07-19; do NOT re-flag** the §8.2 tension. File stays untracked.
 - **Open item (unchanged):** `~/.zshrc` plaintext API keys flagged, unrotated —
   user's call, do not act.
 
+### What's next → see [TASKS.md](TASKS.md) ▶ NEXT UP and [DECISIONS_NEEDED.md](DECISIONS_NEEDED.md) D5
+The big one is **Phase 7 — the cut/bulk plan layer** (the first thing that
+*steers* rather than observes), blocked on the D5 target-model decision.
+
 ---
 
-## Session 2026-07-25 (overnight, autonomous) — MFP-as-daily-driver + Session-3 queue (branch `feat/mfp-adapter`)
+## Session 2026-07-26 — Grok provider, HRV verdict, doc/code sweep
 
-User instruction before sleeping: "modify code to use mfp now instead of healthkit
-(mainly ingest and sync cli commands)… then start the next tasks… document each
-step." Budget noted: ~9 h / $60. Each step below is one commit, in order.
+Three pieces of work; all on their own branches → PRs (user reviews/merges).
 
-### Step 1 — `daba69a` refactor(cli): MFP is the daily driver
-- `coach sync` now runs: incremental WHOOP → incremental MFP (diary + weight,
-  `auto_since` watermark, `until` = today in COACH_HOME_TZ) → normalize.
-- HealthKit **removed from the automatic path**. It no longer silently ingests
-  a default `apple_health_export/export.xml`; it runs only when `--hk-file` is
-  passed explicitly, and `ingest healthkit` help now says "occasional backfill".
-  Rationale: MFP supplies daily food AND weight; re-reading a stale export
-  every sync was noise. The HealthKit adapter itself is untouched (it remains
-  the sanctioned body-comp backfill path).
-- Both sync sources skip cleanly when unconfigured (missing cookie → "not
-  configured"; expired cookie → "auth needed" + re-paste hint), matching the
-  WHOOP pattern. Verified: 230 tests, ruff, mypy; fresh-DB `sync` smoke run.
-- Swept for other daily-path healthkit references: `doctor` raw-counts line and
-  the explicit backfill command are the only remainders (both correct).
-  README has none (it predates all of this; refreshed in a later step).
+- **Grok provider (PR #13, merged).** Added xAI Grok as a third LLM provider on
+  its own branch (user has Grok API credits for eval). It's the OpenAI
+  chat-completions wire shape — genuinely different from Gemini and Anthropic —
+  and it dropped in with **zero agent-loop changes**: one module
+  (`coach/llm/grok.py`) + one registry line. That's the §2.5 vendor abstraction
+  proving itself. Verified against xAI's live docs first (don't guess APIs).
+  Grounding 3/3 on real credits.
 
-## Session 2026-07-25 (b) — sleep slice, live verification, review fixes (branch `feat/session4-sleep-calibration`)
+- **HRV deterministic verdict (PR #14, merged).** The user caught that `coach
+  eval hrv` printed a static "reading:" legend regardless of the numbers — the 5
+  stat lines were real, but the tool never *concluded*. Now `hrv_verdict()`
+  (`compute/hrv_validation.py`) makes a signal/noise/insufficient call from the
+  real stats vs fixed thresholds (autocorr ≥ 0.30 AND a next-day |r| ≥ 0.20;
+  absolute value, so a strong negative still counts; insufficient sub-stats are
+  ignored, never zeroed). **Live result on the real DB: NOISE** — 72 HRV days,
+  lag-1 autocorr +0.19, best next-day r 0.14. An honest null on risk #6's core
+  bet. It shapes Phase 7: lean on weight-trend + intake, treat recovery lighter.
 
-Branch created off main FIRST this time (see the violation note below). All work
-below is on `feat/session4-sleep-calibration`, unpushed → PR pending.
+- **Codebase placeholder sweep (this session).** User asked to find any other
+  hardcoded/placeholder/"reserved-for-later" output like the old `eval hrv`.
+  Swept CLI + compute + coach + tools. **Finding: `eval hrv` was the only one**
+  (already fixed). Everything else computes from real data. Two pieces of
+  genuinely-gated future code exist but emit **no** fake output — they're just
+  not surfaced yet:
+  * `compute/calibration.py` (`calibration_report`/`compare_series`) — real math,
+    no live caller; needs `whoop_ble` sibling rows that don't exist until the BLE
+    hardware spike lands. (Could run today on healthkit-vs-mfp weight, but no
+    command wires it — a surfacing gap, not a placeholder.)
+  * `compute/guardrails.py` (`clamp_calorie_target`/`calorie_floor_alert`) —
+    built for Phase 7's target layer; fires only when a target is proposed.
 
-**Live credentials were available for this session**, so several long-standing
-"unverified" items are now verified against the real install and real APIs.
+- **Docs refreshed:** TASKS.md gained a top-of-file ▶ NEXT UP block (so work
+  resumes cleanly after any usage-limit cutoff), Phase 7 sketch, and the
+  session-4/5 records; README added Grok; DECISIONS_NEEDED added D5 (cut/bulk
+  target model); this log rewritten; pre-session-4 detail archived to
+  `docs/sessions/2026-07-19-to-25.md`.
 
-### Step 1 — `e81a417` fix(coach): the model has no clock
-The first-ever live `coach ask` immediately exposed a real defect: Gemini
-guessed a training-era date (`end=2023-11-20`), queried empty windows, and
-honestly reported "no data" — right answer, wrong world. §2.2 ("code computes")
-extends to the calendar:
-- `agent.ask(today=...)` appends the real date (COACH_HOME_TZ, §2.6) to the
-  system prompt and instructs the model to OMIT date args for "now".
-- Every tool's `end`/`date` is now optional; `dispatch(today=...)` fills the
-  real current day_key server-side when omitted. An explicit model date still
-  wins (tested both ways).
-- Re-tested live: model omitted dates, tools anchored on today, answer grounded
-  in the real 83.14 kg trend, with a Gemini prompt-cache hit.
-- Also swapped the MFP weight fixture to the LIVE-VERIFIED shape (`items` LIST,
-  `type: "Weight"` capital-W, `has_more`/`total_entries` envelope) — the live
-  run proved the normalizer already tolerated it.
+---
 
-### Step 2 — `105e4bd` fix(llm): honor Gemini's JSON retry hint
-`coach eval grounding` died on RESOURCE_EXHAUSTED. Cause: the free tier caps
-gemini-2.5-flash at 20 req/min and Gemini puts the wait in the error BODY
-(`error.details[].retryDelay`, and the message text) — never a `Retry-After`
-header, which is all the base class knew how to read. Exponential backoff
-exhausted its retries inside the quota window. `base._retry_delay` now receives
-the error body; `GoogleProvider` parses the hint (+1 s cushion, capped 90 s).
+## Session 2026-07-25 (b) — sleep slice + live verification + review fixes (PR #12, merged)
 
-### Step 3 — `886a8ce` feat(sleep): canonical sleep table (migration 0009, schema v9)
-Sleep was raw-ingested from day one but only `respiratory_rate` ever reached
-canonical. This promotes the full record — the last §1 data type without a home:
-- Objective stage durations (in-bed/light/SWS/REM/awake minutes, cycle +
-  disturbance counts, respiratory rate) are cross-source **calibration
-  currency** for Adapter B; composite percentages carry `score_method` +
-  `is_official` because WHOOP's weighting is proprietary (§5).
-- One row per sleep SESSION; naps are sibling rows flagged `is_nap`;
-  `day_key` = the local day the sleep ENDED (the day it serves).
-  `sleep_resolved` view picks one authoritative NIGHT sleep per day.
-- Field names verified against BOTH the live raw payloads in the real DB and
-  developer.whoop.com; the fixture was upgraded from a 2-field stub to the full
-  real shape (night + nap + unscored records).
-- LIVE: 103 sleep sessions canonicalized; `coach status` now shows recovery +
-  sleep + weight + food together — the §1 thesis on one screen.
-- **Rebuild proven byte-identical on the REAL database** (fingerprint unchanged
-  across `normalize --rebuild`), not just on fixtures.
+Live credentials were available, so several long-"unverified" items are now
+verified against the real install and real APIs.
 
-### Step 4 — `f1a8922` feat(calibration): cross-source agreement stats
-The machinery ADR-0012's time-sliced calibration play will need: per-metric
-mean bias, MAE, and correlation of source B against reference source A over the
-days both reported. Pairs only shared days (§2.7 — no interpolation);
-Insufficient below 14 shared days. Objective metrics only — the composite score
-is excluded by whitelist (proprietary weighting isn't comparable, §5), which
-also keeps the metric name out of SQL unless validated.
-
-### Step 5 — `28660f2` fix(secrets): namespace token files by user_id
-An external review (Gemini) caught a **real bug**: `.credentials/*.json` were
-global, so a second user authorizing WHOOP would silently overwrite the first
-user's refresh token. Tokens now live in `.credentials/u<user_id>/`; a legacy
-global file is transparently MOVED on first access (never copied — no stale
-duplicate secret; never deleted). LIVE-VERIFIED: both real tokens adopted into
-`u1/`, then a real WHOOP ingest (including an OAuth auto-refresh through the
-moved file) and a real MFP ingest both succeeded.
-*Same review's "Python 3.14 runtime floor" finding was checked and is **not**
-real — `requires-python = ">=3.11"`; only ruff/mypy `target-version` tracks
-3.14, which is the documented §3 policy.*
-
-### Step 6 — `f68634b` refactor(sync): extract orchestration into a service seam
-`_cmd_sync` mixed domain logic (which sources run, how each degrades) with
-`print()`. Any future non-CLI caller would have had to reimplement it. Now
-`services/sync.py::run_sync()` returns a `SyncResult` and the CLI only formats
-it — the same layering as compute → tools → CLI. Clients are injected, so the
-orchestration tests run with zero credentials. The degradation contract is now
-explicit and tested: one dead source never costs you the others. No server, no
-framework, nothing speculative added (§11).
-
-### Step 7 — `8ecaa52` fix(eval): the grounding scorer cried wolf
-With the retry fix in, `coach eval grounding` finally RAN — and reported 0/3
-passed. Every failure was a false positive; the model had answered perfectly:
-- `fabricated=['14','10','0']` were the tool's OWN window and insufficient
-  markers, quoted back ("needs 10 days, you have 0").
-- `fabricated=['1']` was the "1" in "May 1, 2026" — the stripper only knew ISO
-  dates.
-
-This mattered more than it looks: a zero-fabrication guard that fails on
-correct answers gets ignored, quietly retiring the project's #1 differentiator.
-Fixes: strip prose dates too, and derive the `allowed` set from what the model
-was actually GIVEN (the runner replays each successful tool call — read-only,
-identical output — and harvests every nested number). Faithfully restating a
-tool's insufficient-data counts is grounded behavior; an invented measurement
-is still caught (tested both ways). Bools can't launder a 0.
-
-### Verified live this session (previously unverified)
-- `coach ask` end-to-end on real data (Gemini free tier) ✓
-- `coach sync` end-to-end through the new service layer (WHOOP + MFP) ✓
-- MFP weight response shape ✓ · WHOOP sleep payload shape ✓
-- Byte-identical `--rebuild` on the real 500+-row raw store ✓
-- Token namespacing migration on the live install ✓
+- **Model-has-no-clock fix** (`e81a417`) — the first live `coach ask` had Gemini
+  guessing a training-era date and querying empty windows. `ask(today=...)` now
+  injects the real date (COACH_HOME_TZ); `dispatch(today=...)` fills omitted date
+  args server-side (§2.2 extends to the calendar). An explicit model date still wins.
+- **Gemini free-tier retry** (`105e4bd`) — honor the JSON `retryDelay` hint in the
+  error body (Gemini never sends a `Retry-After` header); unblocked `eval grounding`.
+- **Sleep canonical slice** (`886a8ce`, migration 0009, schema v9) — the last §1
+  data type without a home. Objective stage durations are cross-source calibration
+  currency; composite percentages carry `score_method`/`is_official` (§5). One row
+  per session; naps are sibling rows; `day_key` = the day the sleep ended. Field
+  names verified against live payloads + developer.whoop.com. **103 real sessions
+  canonicalized; rebuild byte-identical on the real DB.**
+- **Calibration stats** (`f1a8922`, `compute/calibration.py`) — bias/MAE/correlation
+  over shared days; wired to whoop_api vs whoop_ble when Adapter B lands.
+- **Credential namespacing** (`28660f2`) — external review caught a real bug:
+  global `.credentials/*.json` meant a second user's WHOOP auth would overwrite
+  the first's refresh token. Now `.credentials/u<user_id>/`; legacy file MOVED on
+  first access (never copied/deleted). Live-verified incl. an OAuth auto-refresh.
+- **Sync service seam** (`f68634b`) — `services/sync.py::run_sync()` returns a
+  `SyncResult`; the CLI only formats it. Degradation contract tested with zero
+  credentials: one dead source never costs you the others.
+- **Grounding scorer fix** (`8ecaa52`) — it was failing correct answers 3/3
+  (flagging the tool's own window/insufficient counts and prose dates as
+  "fabricated"). Now strips prose dates and derives the allowed-number set from
+  what the model was actually given (replays each successful tool call). An
+  invented measurement is still caught; faithfully restating a tool's counts is not.
 
 ### Still not verified
-- `coach eval grounding` full pass — repeatedly blocked by the free-tier
-  20 req/min quota (the retry fix helps within a run, but the eval fires many
-  calls back to back). Re-run when quota is fresh.
+- `coach eval grounding` full 3/3 pass — free-tier 20 req/min quota throttles a
+  back-to-back run. Re-run on fresh quota, or point it at Grok/Anthropic.
 - BLE hardware spike (needs the strap; ADR-0012's acceptance gate).
-
----
-
-### READ THIS FIRST (wake-up summary — 2026-07-25 overnight run)
-
-⚠️ **PROCESS VIOLATION, MY FAULT:** you merged PR #11 before sleeping, which
-left the repo on `main` — and I committed tonight's 6 commits **directly to
-origin/main** without re-checking the branch. That breaks your standing
-"feature branch + PR always" rule. I did NOT force-push or rewrite anything
-(§6.1); the commits are individually small, tested, and documented below, but
-they skipped your review gate. Options: review them post-hoc (`git log
-daba69a..HEAD`), or revert any of them — your call. Recurrence prevention: a
-branch-check is now the first step of every future session (saved to memory).
-
-Final state: **244 tests green, ruff + mypy clean, schema v8, working tree
-clean.** Nothing destructive touched; no live API calls were made; no new
-dependencies. What to do first:
-
-1. Paste `MFP_SESSION_COOKIE` into `.env`, then run the new daily driver:
-   `coach sync` (now WHOOP + MFP food + MFP weight + normalize in one shot).
-   Watch the first real WEIGHT payload — diary is live-confirmed but the
-   measurements response shape is docs-derived (`item` vs `items` both
-   tolerated; anything else is a one-line normalizer fix).
-2. `coach eval hrv` once a few weeks of recovery rows exist — it now measures
-   whether HRV is signal or noise on YOUR data (risk #6).
-3. Read [ADR-0012](docs/adr/0012-ble-adapter-approach.md) — BLE recon found the
-   5.0 protocol is cracked (whoop-vault/NOOP), and that the calibration play
-   must be TIME-SLICED (single BLE bond). The one-evening hardware spike
-   against your MG strap is the next gate there, and it needs you.
-4. Review + merge PR #11 when satisfied (I never merge).
-
-### Step 2 — `6442639` feat(trend): gap-aware EWMA (ADR-0011, migration 0008, schema v8)
-- Problem found while reviewing trend consumers: the EWMA smoothed per ROW.
-  After a 14-day travel gap the next weigh-in still moved the trend only 10%,
-  so the trend — and the TDEE + §8.6 guardrails that read it — lagged reality
-  for weeks after any gap. With the user's constant travel this was a live
-  correctness bug in the signal the whole cut steers by.
-- Fix: effective alpha over a g-day gap = 1-(1-α)^g (the daily EWMA composed g
-  times, so ungapped history is byte-identical — no discontinuity). Missing
-  days are still NOT interpolated (§2.7); only the decay sees the calendar.
-- Implementation is dual and cross-validated: pure-Python ground truth
-  (`compute/trends.py::gap_aware_ewma`, hand-calc tests) + migration 0008
-  recreates the `weight_trend` view with POWER(0.90, JULIANDAY gap) so every
-  reader is gap-aware with zero code change. A test pins view == Python on
-  gapped data (also guards against SQLite builds lacking math functions).
-- 234 tests green; ruff + mypy clean.
-
-### Step 3 — `ac77821` feat(validate): HRV-differentiator validation harness (risk #6)
-- CLAUDE.md §10.6 flags the project's core bet — HRV adds coaching signal
-  beyond weight+intake — as "must be validated, not assumed" (MacroFactor
-  excludes HRV as noise). Built the measurement, not the assumption:
-  `compute/hrv_validation.py` with pearson (honesty floor: <14 pairs or a
-  zero-variance side → Insufficient, never a fake r), lag-1 autocorrelation
-  (pairs only consecutive days — a gap breaks the pair, no interpolation),
-  coefficient of variation, and % deviation-from-trailing-baseline series.
-- `hrv_validation_report()` probes: HRV noise profile + today's-deviation vs
-  tomorrow's recovery score and tomorrow's total strain. Observational
-  correlations only; the printout says explicitly these are NECESSARY, not
-  sufficient, for the differentiator to be real. Interpretation stays human.
-- CLI: `coach eval hrv [--end --window]` — deterministic, zero tokens.
-- Honest note: one hand-computed test expectation was wrong (my arithmetic);
-  the test caught it and the TEST was fixed, code unchanged — noted per §6.2.
-- 244 tests green.
-
-### Step 4 — `e0d3e37` docs(adr): BLE recon + approach (ADR-0012)
-- Researched the local-BLE ecosystem (web recon; no code, no deps, per the
-  TASKS.md blocked-section rule). Material findings:
-  * 5.0 local read is NO LONGER UNPROVEN — `whoop-vault` (Python/Bleak/MIT,
-    protocol from the decompiled official APK, firmware r52 "Maverick")
-    demonstrates live 1 Hz HR/skin-temp/motion AND a full per-second
-    historical drain (`fd4b0002–0007` chars, CRC16 header + CRC32 payload,
-    4-byte alignment, ENTER_HIGH_FREQ_SYNC handshake, ~120 chunks/s).
-  * NOOP claims 5.0/**MG** live HR and documents the protocol split:
-    `61080001` + CRC8 = 4.0 vs `fd4b0001` + CRC16-Modbus = 5.0/MG.
-    OpenStrap is explicitly 4.0-only.
-  * NEW CONSTRAINT: the strap holds ONE encrypted BLE bond — official app and
-    a local reader cannot connect in parallel. §4's calibration play becomes
-    time-sliced (phone syncs normally; periodic laptop re-bond drains the
-    ~14-day on-strap buffer retroactively). Schema already models this
-    (sibling rows, read-time precedence) — zero schema impact.
-- Proposed approach in the ADR: Python+Bleak against `fd4b`, whoop-vault as
-  reference, historical-drain-first, `source='whoop_ble'`, objective
-  measurements only (`is_official=0`). Acceptance gate = one-evening hardware
-  spike with the user's strap. CLAUDE.md §4/§10.1/§12 refreshed from
-  "UNPROVEN" to demonstrated-on-5.0/MG-pending, pointing at the ADR.
-
-### Step 5 — `591ba3f` docs: README refresh
-- Was badly stale (claimed Python 3.14 required, "ingest/status land later",
-  Anthropic-only coach). Now documents: source table with statuses, real
-  daily flow (`coach sync`), the full CLI surface, provider-agnostic LLM
-  setup (Gemini free tier default), privacy posture (local SQLite; the LLM
-  sees computed summaries, never raw data or credentials).
-
-### Step 6 — this file + TASKS.md checkboxes; push; PR #11 comment
-- TASKS.md: Session-3 queue recorded done; BLE blocked-item updated to
-  "recon DONE, spike pending". Remaining unchecked work is all human-gated
-  (live MFP/LLM verification, CSV backfill recon-first, BLE spike, coaching
-  methodology) — deliberately NOT attempted unattended, per TASKS.md's own
-  "don't rush design-heavy work to fill time" rule.
-
----
-
-## Session 2026-07-24 (b) — MFP live reconciliation + weight + WHOOP fixes (branch `feat/mfp-adapter`)
-
-Follow-up to the same-day MFP adapter build, driven by the user's live testing.
-
-- **MFP diary param fixed:** `date` → **`entry_date`** (user caught it live — an
-  unknown param makes MFP silently return TODAY). `/v2/diary`.
-- **MFP diary shape LIVE-RECONCILED** against a real payload: entries are
-  per-MEAL aggregates (`type:'diary_meal'`, meal in `diary_meal`, summed
-  `nutritional_contents`), NOT per-item. The `items` list also carries non-food
-  `exercise_entry`/`steps_aggregate` — normalizer now **filters to diary_meal**
-  (folding those in would fabricate calories). Fixture replaced with a
-  structurally-real one (synthetic macro values).
-- **MFP weight added** (user's call: get weight from MFP, not WHOOP):
-  `GET /v2/measurements?type=weight&entry_date=…` → `{item:{value,unit,date,
-  updated_at}}`. `client.get_weight`, ingest pulls diary+weight per day
-  (`record_type` `diary`+`measurement`), `parse_measurement` (lb/kg/stone→kg;
-  day_key exact; measured_at NULL — MFP gives a day not an instant). **Migration
-  0007** widens `weight_measurement.source` + ranks `myfitnesspal` BELOW manual
-  (user-typed; a real scale always wins). Proven on FK-linked data.
-- **WHOOP ingest bug-fixes** (user's edits were broken by a wrong "collection"
-  assumption): `client.get_body_measurement` reverted to return the single dict
-  (`list()` was keeping the KEYS, dropping the numbers); removed the crashing +
-  duplicate `plan` line. Body measurement is a single dateless object — stays
-  raw-only, NOT normalized (dateless static value would corrupt the EWMA trend).
-- Removed the user's debug `print` in `ingest.py` during the weight restructure.
-
-**Verified:** 230 green, ruff + mypy clean; migrations 0006+0007 proven on
-FK-linked data; schema now **v7**. **Next:** live `coach ingest mfp` end-to-end
-(diary + weight) once usage resets; watch the first real weight payload (the
-`item` vs `items` shape — normalizer tolerates both).
-
----
-
-## Session 2026-07-24 (a) — MyFitnessPal direct adapter (branch `feat/mfp-adapter`)
-
-User wanted off the daily manual-export treadmill (Apple Health / MFP CSV) and
-asked about `python-myfitnesspal` / `myfitnesspal-mcp-python`. Recon: both hit
-MFP's **private** API (HTML scrape and/or internal v2 JSON) with the browser
-session — the path §12 banned. Laid out the trade-off; **user signed off to
-override §12** for their own account (ADR-0010) and to **drop the
-`raw_events.source` CHECK entirely** rather than extend it (ADR-0009).
-
-Built (stdlib + httpx, **zero new deps**; mirrors WHOOP adapter):
-- `adapters/myfitnesspal/`: `auth.py` (cookie → bearer, cached 0600, refresh),
-  `client.py` (injectable transport, bounded retry, no token/cookie leak),
-  `ingest.py` (one raw event per diary day, idempotent, edit → sibling).
-- `normalize/myfitnesspal.py`: pure `raw → FoodEntryRow[]`; MFP date = local
-  `day_key`; absence stays NULL; empty diary = no rows (not a fast). Runner clears
-  + rebuilds the MFP slice each run so edited-away items don't orphan.
-- `store/canonical.py`: `upsert_food` + `food_id`; food folded into the rebuild
-  fingerprint. Migration **0006** (raw_events CHECK drop + food_entry widen +
-  view precedence). Runner hardened for parent-table rebuilds (see above).
-- Config `MFP_SESSION_COOKIE` + `require_mfp()`; `.env.example`; CLI `ingest mfp`.
-- Tests: `test_mfp_normalize`, `test_mfp_adapter`, `test_mfp_pipeline`, + 2 runner
-  guard tests (dangling-FK rollback; parent rebuild preserves children).
-
-**Verified:** 223 green, ruff + mypy clean; migration proven on FK-linked data in
-a scratchpad; CLI smoke (db init → v6, ingest mfp clean-errors without a cookie,
-doctor lists myfitnesspal). **NOT verified:** live MFP call — the v2 diary READ
-path + field names are reconstructed and **reconcile on first live contact**
-(§10.2), isolated to the adapter + fixture.
-
-**Next (human):** log in at myfitnesspal.com, paste the Cookie header into
-`.env` as `MFP_SESSION_COOKIE`, run `coach ingest mfp --since <date>` →
-`coach normalize` → `coach status`. Expect a first-contact field reconciliation.
-
----
-
-## Session 2026-07-20 (b) — revamp session 2: `coach ask` (branch `revamp/coach-ask`)
-
-Phase 4 completed: the coach actually coaches. **Zero new dependencies** —
-stdlib urllib Messages client (§6.4; no cloud SDK), injectable transport so
-tests never touch the network (§6.2), bounded retries honoring retry-after,
-prompt caching on SYSTEM_PROMPT (§8.7), secrets never logged (§8.4).
-
-- `coach/llm.py` client + `coach/agent.py` bounded loop (MAX_ROUNDS=8) over the
-  deterministic tool contract; refusal/pause_turn/max_tokens/unknown-tool/round-
-  exhaustion all explicit.
-- `run_live_grounding` implemented (was gated stub) — per-scenario fresh
-  in-memory DB, scored via admits_absence + fabricated_numbers (date-tolerant).
-- CLI: `coach ask "…" [--show-tools]`, `coach eval grounding` (exit 1 on any
-  fabrication). `COACH_MODEL` default claude-opus-4-8, overridable (§8.7).
-- Intentional test change (§6.2): `test_live_runner_is_gated` (asserted
-  NotImplementedError) replaced — the runner is now the feature; offline
-  coverage lives in `test_coach_agent.py` (fake transport).
-- 176 tests green; ruff + mypy clean.
-### Provider-agnostic follow-up (same branch, user request: no paid credits)
-- `llm.py` → `coach/llm/` package mirroring `adapters/`: canonical conversation
-  shape in `base.py`, one module per vendor (`google.py`, `anthropic.py`),
-  `PROVIDERS` registry + `build_provider()`. Agent loop never sees a vendor
-  field name (§2.5) — switching providers is a config value.
-- **Default provider = Google Gemini** (`gemini-2.5-flash`, real free tier).
-  Anthropic kept as an option. `COACH_LLM_PROVIDER`, `GOOGLE_API_KEY`,
-  `COACH_MODEL` (empty ⇒ provider default).
-- Gemini translation notes: role `model` not `assistant`; functionResponse
-  matched by **name** (no call id — canonical ToolResult carries both);
-  functionDeclarations need an OpenAPI subset (types upper-cased, `minimum`
-  stripped or 400); SAFETY/RECITATION ⇒ canonical refusal; implicit caching.
-- Keys in headers only, never URL params (§8.4) — asserted by test.
-- Agent-loop tests **parametrized across both providers** — identical behavior
-  is the proof of the abstraction. 200 tests green; ruff + mypy clean.
-
-- **Human steps:** get a free key at aistudio.google.com/apikey → `GOOGLE_API_KEY`
-  in `.env`; run `coach doctor`, then `coach ask "how am I doing?" --show-tools`
-  and `coach eval grounding`. Session 3 (BLE ADR, gap-aware EWMA, HRV validation
-  harness, README) still queued.
-
-## Session 2026-07-20 (a) — revamp session 1: correctness + friction (branch `revamp/core-upgrades`)
-
-User granted full creative latitude (reviews PR before merge). Three-session plan;
-this is session 1 of 3. Sessions 2–3 queued: (2) `coach ask` agent loop via
-stdlib-only Anthropic REST client (no SDK dep — §6.4 stays pure) + live grounding;
-(3) BLE recon ADR, gap-aware EWMA (+ADR), HRV-validation harness, sleep table, README.
-
-### Done (session 1)
-- **Bug fix:** HealthKit mass conversion was unconditionally lb — a kg-unit record
-  would double-convert. Now unit-aware (lb/kg/g/oz/st; unknown unit -> row skipped,
-  §2.7); BodyFat 0–1-fraction guard.
-- **Migration atomicity:** executescript's implicit COMMIT left partial DDL on
-  mid-file failure. Now statement-split + one explicit transaction per migration.
-- **resp_rate enrichment:** recovery rows carry resp_rate_bpm joined from raw WHOOP
-  sleep by sleep_id (parse_recovery stays pure; synthetic sleep fixture, labeled).
-- **CLI:** `coach sync` (incremental auto-since WHOOP + HK if present + normalize),
-  `coach doctor`, `coach db backup|verify`, `--json` on status/tdee (emits the
-  coach tool-layer dicts — one contract), `--date`/`--end` default to today in
-  COACH_HOME_TZ. `ingest whoop --since` now optional (incremental).
-- **Multi-agent review over the diff** (3 lenses + adversarial verify): 13 raw
-  findings, 4 confirmed empirically + 5 self-verified. All fixed: doctor/verify
-  no longer crash on an unmigrated DB (doctor now read-only), write-path
-  commands auto-migrate, splitter handles statements sharing a line + rejects
-  in-file BEGIN/COMMIT, atomic .part backup, per-type auto_since watermark ('Z'
-  form), deterministic resp_rate sibling pick, weight_skipped surfaced.
-- 161 tests green; ruff + mypy clean.
-- **User's real DB confirmed live:** doctor shows whoop_api 354 + healthkit 1410
-  raw rows (user ran the ingest themselves).
-
-## Session 2026-07-19 (e) — Phase 4 pre-work while MFP CSV pending
-
-Branch `phase4/coach-layer` (stacked on merged #6). Food-independent Phase-4 work.
-
-- **T4.1** `coach/tools.py` — 5 model-callable tools over Phase-3 compute;
-  structured data + provenance + explicit null/insufficient; no prose/math (§2.2).
-- **§8.6** `compute/guardrails.py` — code-enforced hard limits (weight-loss-rate
-  alert off EWMA trend; 1200 kcal floor). Surfaced as `get_safety_flags`.
-- **T4.2** `coach/grounding.py` — faithfulness SYSTEM_PROMPT + fabrication-risk
-  scenarios + absence/fabrication helpers. Substrate honesty tested deterministically;
-  **live-model eval gated** (Anthropic SDK §6.4 + tokens §8.7 — `run_live_grounding`
-  raises, never in pytest).
-- 145 tests green; ruff + mypy clean. GateGuard stays off (user-authorized).
-
-## Session 2026-07-19 (d) — Phase 5 WEIGHT built (D3 + T5.3–T5.8)
-
-Branch `phase5/healthkit-weight` (off merged main). One feature commit + docs.
-
-### Done
-- **D3 resolved** → ADR-0008 (option 1, per handoff). Migration **0005**:
-  non-destructive `source_app` + `utc_offset` columns on `weight_measurement` +
-  `food_entry`; resolver views recreated so an OKOK **scale** weigh-in outranks an
-  MFP-**mirrored** weight as siblings (§2.3), and two food apps under one source
-  stay siblings instead of SUM-double-counting. **raw_events untouched** (§8.5).
-- **T5.3** `adapters/healthkit/ingest.py` — body-only raw ingest,
-  `source='healthkit'`, deterministic `external_id`, idempotent. Dietary
-  **deliberately skipped** (food = MFP CSV; keeps stale 5-day HK food from
-  competing with real MFP food later).
-- **T5.4/T5.5** `normalize/healthkit.py` — pure body parser: lb→kg, BodyFat %,
-  LeanMass; BMI/missing→None (§2.7); `tz_name` NULL (no HKTimeZone on body rows);
-  `day_key`/`utc_offset` from startDate offset. **One canonical row per HK record
-  (1:1 raw_ref)** — chose this over merging metrics, to keep provenance honest.
-- **T5.6** CLI `ingest healthkit`; weight wired into `normalize` (+`--rebuild`
-  clears/re-derives `weight_measurement`; fingerprint covers it → byte-identical
-  rebuild proven).
-
-### Verified against the REAL export (scratch DB, user DB untouched)
-- 1410 body records ingested in ~7s (memory-flat). Normalize → 1084
-  `weight_measurement` rows (431 with weight_kg). **298 resolved days,
-  2023-07-06 → 2026-07-18.** app split okok 978 / mfp 103 / cronometer 2 /
-  health 1 — matches T5.1 recon exactly.
-- `coach status --date 2026-07-18` → `weight [healthkit]: 83.19kg (trend
-  82.60kg)`. `coach tdee` → correctly "insufficient intake" (food = Phase 6).
-
-## Session 2026-07-19 (c) — nutrition-source diagnosis; Phase 5 replan
-
-Investigated why adaptive TDEE has no intake to calibrate on. **Read-only** — two
-scratchpad scripts against the real export; no repo code changed, no commits.
-
-### Finding — HealthKit is NOT a viable food source
-- Export is **current** (latest record 2026-07-19; weight/HR/steps live through
-  Jul 18–19). Not stale.
-- **Dietary data dies 2026-02-12.** Across all 34 `Dietary*` types, only **5 distinct
-  logged days ever** exist in the export: MFP 2025-10-24/25/26, Foodnoms 2026-02-11/12.
-  Longest consecutive run = **3 days**. No 2-week calibration window.
-- Cause: **MyFitnessPal stopped writing to Apple Health after 2025-10-26** (no MFP
-  record of any type after that date). Known MFP behavior — Apple Health sync got
-  **paywalled behind MFP Premium** ~2024–25; the toggle shows "connected" but silently
-  stops. User confirms they logged consistently Feb–June *in MFP* — that history lives
-  on MFP's servers, never reached HealthKit.
-
-### Replan (decided with user)
-- **Food source = a new MFP CSV adapter**, not HealthKit passthrough. HealthKit stays
-  the **weight/body-comp** source (rich, live).
-- MFP free-tier Reports export = last 7 days only (empty). Correct path = MFP
-  **Privacy Center → "Download My Data"** (full account history, free, CCPA/GDPR).
-  **User is submitting that request; the zip arrives ~2026-07-20 afternoon.**
-- No scraping (CLAUDE.md §12 / ToS). The user's own data-portability export is the
-  sanctioned path — §12 updated to say so.
-
-### New blocker surfaced
-- MFP-CSV raw ingest needs `raw_events.source='myfitnesspal'`, which is **not** in the
-  fixed CHECK list → widening it rebuilds the sacred `raw_events` (real WHOOP data) →
-  §8.5 human sign-off. **Flagged as D4.** (Note: this CHECK-rigidity contradicts §2.5
-  "adding a source should be a new adapter file, not a schema change" — a `sources`
-  lookup table is the aligned long-term fix; see D4.)
-
----
-
-## Next session — do in this order
-
-**A. Weight/body-comp — ✅ DONE + MERGED (#5/#6). Phase 4 pre-work ✅ MERGED (#7).**
-   Remaining human step: first real ingest into the actual DB — `coach db init &&
-   coach ingest healthkit --file apple_health_export/export.xml && coach normalize`
-   (verified only against a scratch DB so far). `db init` first — applies 0005.
-
-**B. Food / MFP (starts when the CSV lands — expected ~2026-07-20 PM):**
-5. **Recon the MFP CSV first** — headers, date format, meal grouping, units, date
-   range, distinct logged days. Do NOT assume columns (the WHOOP-404 lesson). Confirm
-   the Feb–June month is present + gap-free.
-6. Answer **D4** (raw_events source for MFP). Build `src/coach/adapters/mfp/` — raw
-   ingest + pure `food_entry` normalizer (day_key from CSV local date, no zero-fill §2.7).
-
-**C. Open items (need the human):**
-- `~/.zshrc` plaintext API keys — flagged, still unrotated.
-- Live grounding eval (T4.2) — needs Anthropic SDK (§6.4 sign-off) + API key +
-  token spend (§8.7). `run_live_grounding` raises until wired.
-- (GateGuard §8.2 — RESOLVED: stays off, user-authorized. No longer an open item.)
-
-### Verified vs unverified
-- Verified: weight pipeline end-to-end on the REAL export (1410 records, 298
-  resolved days, trend in `status`); Phase 4 tools/guardrails/grounding
-  deterministic; 145 tests / ruff / mypy green; idempotent + byte-identical rebuild.
-- Unverified: not yet ingested into the user's **actual** DB (scratch DB only) —
-  human step. MFP privacy-export contents (not yet received). D4 still open. Live
-  model faithfulness (grounding) not yet run.
