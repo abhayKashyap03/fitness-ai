@@ -12,7 +12,8 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 State: **328 tests green · ruff + mypy clean · schema v10 · on `main` after PRs #12–#16 merged.**
 Phases 0–7 done. The coach answers grounded questions live, and now *steers*: a
 cut/bulk plan sets a daily calorie goal + adherence. Evals pass. Running daily on
-real data. What's left, in priority order:
+real data. **Full roadmap (CLI → iOS app → public): [docs/ROADMAP.md](docs/ROADMAP.md)**
+(mirrors the Notion Project Task Board). What's left near-term, in priority order:
 
 1. **🧑 BLE hardware spike (Adapter B)** — the biggest open item and the
    subscription-survival play. One-evening gate in
@@ -271,7 +272,7 @@ Before you stop (or when the window is nearly exhausted):
 
 ## Phase 5 — Apple Health ingestion (WEIGHT / body-comp only)
 
-Full spec in `TASKS_PHASE5.md`. **Scope revised 2026-07-19c:** Apple Health is
+**Scope revised 2026-07-19c:** Apple Health is
 our **weight/body-comp** source only. It is NOT a usable nutrition source — MFP
 stopped writing food to Apple Health after Oct 2025 (Premium paywall), leaving
 only 5 dietary days in the whole export. **Food moved to Phase 6 (MFP CSV).**
