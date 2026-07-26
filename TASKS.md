@@ -7,6 +7,34 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ---
 
+## ▶ NEXT UP (start here — updated 2026-07-26)
+
+State: **304 tests green · ruff + mypy clean · schema v9 · on `main` after PRs #12–#14 merged.**
+Phases 0–6A done; the coach answers grounded questions live. What's left, in priority order:
+
+1. **🔒🧑 Phase 7 — the cut/bulk PLAN layer (the missing product core).** Everything
+   so far *observes*; nothing yet *steers*. This is the deterministic target →
+   calorie-goal → adherence machinery, clamped by the existing §8.6 guardrails
+   (`clamp_calorie_target`, `calorie_floor_alert` are already built and waiting).
+   **BLOCKED on one human decision** — see [DECISIONS_NEEDED.md](DECISIONS_NEEDED.md)
+   D5: is a target set by *goal-weight + deadline* or by *%/week rate*? The HRV=noise
+   finding (below) means lean on weight-trend + intake; treat recovery as a lighter input.
+   Full sketch in **Phase 7** below.
+2. **🧑 BLE hardware spike (Adapter B)** — the one-evening gate in
+   [ADR-0012](docs/adr/0012-ble-adapter-approach.md). Needs the physical MG strap.
+   Unlocks `compute/calibration.py` (built, no live caller yet — nothing to compare
+   against until `whoop_ble` rows exist). Subscription-survival play.
+3. **🧑 `coach eval grounding` clean 3/3 pass** — scorer fixed; free-tier 20 req/min
+   quota throttles a full run. Re-run on fresh quota, or point it at Grok/Anthropic.
+4. **⏭️ Phase 6B — MFP CSV backfill** — secondary; the daily v2 API path covers current data.
+
+Housekeeping done this session (2026-07-26): full codebase sweep for placeholder/
+hardcoded output — **only `coach eval hrv` was one, already fixed in #14**; the rest
+computes from real data or is honestly gated on a missing source (BLE, target layer).
+Docs refreshed (this file, README, SESSION_LOG).
+
+---
+
 ## Phase 0 — Design decisions to lock first 🔒
 
 Do these **before** writing implementation code. They're the highest-thinking,
@@ -206,9 +234,9 @@ supports it (§8.7), keys never logged or URL-borne (§8.4). `coach/agent.py`
 is the bounded loop (MAX_ROUNDS=8) over the canonical shape — it never sees a
 vendor field (§2.5). CLI: `coach ask "…" [--show-tools]`, `coach eval
 grounding`; `coach doctor` reports provider/model.
-Config: `COACH_LLM_PROVIDER` (google|anthropic), `GOOGLE_API_KEY` /
-`ANTHROPIC_API_KEY`, `COACH_MODEL` (empty ⇒ provider default).
-**Live verification pending** (needs a provider key — Google free tier).
+Config: `COACH_LLM_PROVIDER` (google|anthropic|grok), `GOOGLE_API_KEY` /
+`ANTHROPIC_API_KEY` / `XAI_API_KEY`, `COACH_MODEL` (empty ⇒ provider default).
+**Live-verified** on Google (free tier) and Grok (grounding 3/3).
 
 ---
 
@@ -336,6 +364,51 @@ scrape ban was **overridden with sign-off** for the user's own account
 - [ ] **`coach eval grounding` clean pass** — the scorer is fixed and the eval
   now runs, but the free tier's 20 req/min quota throttles a full 3-scenario
   run. Re-run on fresh quota to confirm 3/3.
+
+## Session-5 (2026-07-26) — Grok provider, HRV verdict, doc/code sweep
+
+- [x] **xAI Grok provider** (PR #13, own branch per user) — third wire shape
+  (OpenAI chat-completions) added with zero agent-loop changes: one module
+  (`coach/llm/grok.py`) + one registry line, proving the §2.5 vendor abstraction.
+  System-as-message, tool-result fan-out, JSON-string args, usage cache split.
+  Grounding 3/3 on real credits.
+- [x] **HRV deterministic verdict** (PR #14) — `coach eval hrv` used to print a
+  static "reading:" legend regardless of the numbers. Now `hrv_verdict()` makes a
+  signal/noise/insufficient call from the real stats vs fixed thresholds
+  (autocorr ≥ 0.30 AND a next-day |r| ≥ 0.20). **Live result: NOISE** — 72 HRV
+  days, autocorr +0.19, best next-day r 0.14. Honest null on risk #6; shapes
+  Phase 7 toward weight+intake.
+- [x] **Codebase placeholder sweep** — grepped CLI/compute/coach/tools for
+  hardcoded/reserved-for-later output. `eval hrv` was the only one (already fixed).
+  `calibration.py` + calorie-floor clamp are gated on missing sources, not fake output.
+- [x] **Doc refresh** — TASKS NEXT-UP block, README (Grok), SESSION_LOG rewrite,
+  DECISIONS_NEEDED D5 (cut/bulk target model).
+
+---
+
+## Phase 7 — the cut/bulk PLAN layer 🔒🧑 (NEXT BIG WORK — design-heavy)
+
+The product core that turns the observation engine into a coach that *steers*.
+Deterministic (§2.2): code computes the target and the daily calorie goal; the
+LLM only narrates. Guardrails already exist (`compute/guardrails.py`).
+
+**Gated on D5** ([DECISIONS_NEEDED.md](DECISIONS_NEEDED.md)) — target model:
+goal-weight+deadline vs %/week rate. Do NOT pick this alone (one-way door: it
+shapes the schema and every downstream number). Sketch, once D5 lands:
+
+- [ ] **T7.0 — `plan` canonical table + migration** — one active plan per user:
+  direction (cut/bulk/maintain), target (per D5), start/target weight, rate,
+  protein floor. Sibling-row/provenance pattern; forward-only migration.
+- [ ] **T7.1 — `compute/plan.py`** (pure) — from the plan + adaptive TDEE +
+  weight trend: daily calorie goal, projected timeline, on/off-track delta.
+  Every output degrades to Insufficient on thin data (§2.7). Clamped by §8.6
+  (calorie floor, max loss rate) — the clamp wins, always.
+- [ ] **T7.2 — `get_plan_status` coach tool** — structured plan-vs-actual, with
+  any fired safety Alert surfaced verbatim. No prose, no math.
+- [ ] **T7.3 — CLI** — `coach plan set …` / `coach plan status`; `coach status`
+  gains a plan line. `coach ask` can now reason about adherence.
+- [ ] **T7.4 — Tests** — target math against hand-computed fixtures; guardrail
+  clamps fire; insufficient-data paths; timeline projection tolerance.
 
 ## Phase 6B — MyFitnessPal CSV backfill (still valid, secondary)
 

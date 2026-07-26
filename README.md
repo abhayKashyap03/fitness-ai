@@ -49,7 +49,8 @@ Every `.env` value is documented in [`.env.example`](.env.example):
   `MFP_SESSION_COOKIE` (lasts ~weeks; re-paste when ingest 401s).
 - **Coach LLM** — provider-agnostic. Default is Google Gemini
   (`GOOGLE_API_KEY`, free tier at <https://aistudio.google.com/apikey>);
-  Anthropic is a config switch away (`COACH_LLM_PROVIDER=anthropic`).
+  Anthropic (`COACH_LLM_PROVIDER=anthropic`) and xAI Grok
+  (`COACH_LLM_PROVIDER=grok`, `XAI_API_KEY`) are a config switch away.
 
 ## Usage
 
