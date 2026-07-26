@@ -11,7 +11,10 @@ far-future work is **epics**, deliberately coarse and refined when closer
 evenings-and-weekends pace. Guardrails and principles live in
 [CLAUDE.md](../CLAUDE.md); decisions in [docs/adr/](adr/).
 
-Status legend: **Done** · **Next** (actionable now) · **Backlog** · Blocked.
+**Board columns** (Trello-style, adapted from Dane Wesolko's design board —
+dropping On-Hold / In Development / Archived as redundant at n=1):
+**Inbox** → **Backlog** (far-future / not-soon) → **Next Up** (actionable queue)
+→ **In Progress** → **Blocked** (dependency-gated) → **Review** → **Done**.
 
 ## Product data model (shipped product, decided 2026-07-26)
 
@@ -49,26 +52,26 @@ The eventual product is a **native iOS (SwiftUI) app + multi-tenant backend**.
 
 The post-membership path; the biggest open item. ADR-0012.
 
-- **[Next · P0]** BLE spike — confirm 5.0 **MG** local read on the actual strap (Bleak, `fd4b` family; whoop-vault reference). _Depends: physical strap._
-- **[Backlog]** Historical drain → `raw_events` (`source='whoop_ble'`, append-only, time-sliced). _Depends: spike._
-- **[Backlog]** Recompute objective metrics from raw (HRV/HR/SpO2/skin-temp; `is_official=0`). _Depends: drain._
-- **[Backlog]** Wire `calibration_report` to a surface (`coach eval calibration`: whoop_api vs whoop_ble). _Depends: whoop_ble rows._
-- **[Backlog]** Precedence flip at membership end (one-line resolver reorder). _Depends: calibration acceptance._
+- **[Next Up · P0]** BLE spike — confirm 5.0 **MG** local read on the actual strap (Bleak, `fd4b` family; whoop-vault reference). _Depends: physical strap._
+- **[Blocked]** Historical drain → `raw_events` (`source='whoop_ble'`, append-only, time-sliced). _Depends: spike._
+- **[Blocked]** Recompute objective metrics from raw (HRV/HR/SpO2/skin-temp; `is_official=0`). _Depends: drain._
+- **[Blocked]** Wire `calibration_report` to a surface (`coach eval calibration`: whoop_api vs whoop_ble). _Depends: whoop_ble rows._
+- **[Blocked]** Precedence flip at membership end (one-line resolver reorder). _Depends: calibration acceptance._
 
 ## P9 — The differentiator
 
-- **[Backlog · P1]** Recovery-informed training-load auto-scale on low-recovery days.
-- **[Backlog · P1]** Recovery→macro adjustment — **guarded**: HRV is NOISE today; must beat weight+intake before shipping (risk #6). _Depends: HRV showing signal._
-- **[Backlog · P1]** Plan TDEE-backed daily goal live. _Depends: 10+ logged-intake days (data accrual, no code)._
+- **[Next Up · P1]** Recovery-informed training-load auto-scale on low-recovery days.
+- **[Blocked · P1]** Recovery→macro adjustment — **guarded**: HRV is NOISE today; must beat weight+intake before shipping (risk #6). _Depends: HRV showing signal._
+- **[Next Up · P1]** Plan TDEE-backed daily goal live. _Depends: 10+ logged-intake days (data accrual, no code)._
 - **[Backlog]** Protein floor / macro targets in the plan.
 - **[Backlog]** Re-run HRV validation as data grows (revisit the NOISE verdict).
 
 ## P10 — Personal hardening
 
-- **[Backlog]** Coaching memory & consistency (persistent state, not context drift).
-- **[Backlog]** Model routing + prompt-cache / COGS audit (§8.7).
+- **[Next Up]** Coaching memory & consistency (persistent state, not context drift).
+- **[Next Up]** Model routing + prompt-cache / COGS audit (§8.7).
 - **[Backlog]** MFP CSV backfill (Phase 6B — secondary; API path covers daily).
-- **[Backlog]** Expand the zero-fabrication eval set toward ~50 queries.
+- **[Next Up]** Expand the zero-fabrication eval set toward ~50 queries.
 
 ---
 
@@ -114,7 +117,7 @@ Lifts §11's no-server / no-multi-tenancy for real.
 ## Ongoing (cross-cutting)
 
 - **[P1]** Validation — does recovery improve guidance vs weight+intake alone? (Currently NOISE; cut the differentiator honestly if it never beats the baseline.)
-- Validation — recomputed metrics track official scores (BLE calibration acceptance). _Depends: whoop_ble rows._
+- **[Blocked]** Validation — recomputed metrics track official scores (BLE calibration acceptance). _Depends: whoop_ble rows._
 - **[P1]** Safety — maintain §8.6 hard floors; surface harmful patterns; extend for public.
 - Docs — keep SESSION_LOG / TASKS / ADRs / the board current (§6.3).
 - Maintenance — token expiry / API churn / food-DB staleness watch (risk #9).
