@@ -45,6 +45,7 @@ The eventual product is a **native iOS (SwiftUI) app + multi-tenant backend**.
 | **P6 Food (MFP)** | MFP direct v2 API (ADR-0009/0010); food + weight; migrations 0006/0007. **Personal-only.** |
 | **P6.5 Sleep/HRV** | Sleep table (0009); gap-aware EWMA (ADR-0011); HRV validation + verdict → **NOISE**; calibration stats; sync service. |
 | **P7 Plan** | Cut/bulk plan (ADR-0013, migration 0010); `get_plan_status`; `coach plan set\|status`; mid-cut backdating + adherence. Live-verified. |
+| **P7.5 Web UI** | Local dashboard (ADR-0014 — lifts the §11/§6.4 bans for a local single-user UI). FastAPI + Jinja; `/api/*` pass-through of the tool layer (the contract P13 will consume); dashboard + plan + coach chat; `coach web`, localhost-bound. Live-verified. |
 
 ---
 
@@ -96,6 +97,7 @@ Lifts §11's no-server / no-multi-tenancy for real.
 ## P13 — iOS app (SwiftUI) · epics
 
 - **[Backlog · EPIC · P1]** App scaffold + auth. _Depends: backend foundation._
+  _(The `/api/*` contract it consumes already exists and is exercised by the P7.5 web UI.)_
 - **[Backlog]** HealthKit integration (weight/body-comp; HR fallback). _Depends: scaffold._
 - **[Backlog]** On-device WHOOP BLE read (CoreBluetooth; continuous HR). _Depends: BLE spike + scaffold._
 - **[Backlog]** "Single circle" daily dashboard. _Depends: scaffold._
