@@ -396,19 +396,25 @@ LLM only narrates. Guardrails already exist (`compute/guardrails.py`).
 goal-weight+deadline vs %/week rate. Do NOT pick this alone (one-way door: it
 shapes the schema and every downstream number). Sketch, once D5 lands:
 
-- [ ] **T7.0 — `plan` canonical table + migration** — one active plan per user:
-  direction (cut/bulk/maintain), target (per D5), start/target weight, rate,
-  protein floor. Sibling-row/provenance pattern; forward-only migration.
-- [ ] **T7.1 — `compute/plan.py`** (pure) — from the plan + adaptive TDEE +
-  weight trend: daily calorie goal, projected timeline, on/off-track delta.
-  Every output degrades to Insufficient on thin data (§2.7). Clamped by §8.6
-  (calorie floor, max loss rate) — the clamp wins, always.
-- [ ] **T7.2 — `get_plan_status` coach tool** — structured plan-vs-actual, with
-  any fired safety Alert surfaced verbatim. No prose, no math.
-- [ ] **T7.3 — CLI** — `coach plan set …` / `coach plan status`; `coach status`
-  gains a plan line. `coach ask` can now reason about adherence.
-- [ ] **T7.4 — Tests** — target math against hand-computed fixtures; guardrail
-  clamps fire; insufficient-data paths; timeline projection tolerance.
+- [x] **T7.0 — `plan` table + migration 0010 (schema v10)** — first USER-AUTHORED
+  table (not raw-derived; no raw_ref, not in the rebuild/fingerprint). Append-only
+  history, one `is_active` row per user; `direction` CHECK; signed
+  `target_rate_pct_per_week` as the canonical driver (ADR-0013). `store/plan.py`
+  (`PlanRow`, `insert_plan` supersedes prior, `active_plan`).
+- [x] **T7.1 — `compute/plan.py`** (pure) — `resolve_target_rate` (§8.6 loss
+  clamp + note), `rate_from_deadline` (deadline→rate), `plan_status` (daily
+  calorie goal from TDEE + rate, floor-clamped; timeline projection; Insufficient
+  without TDEE/trend). Guardrail `clamp_target_loss_rate` added. Hand-checked
+  tests in `test_plan.py` (17). **321 tests green; ruff + mypy clean.**
+- [ ] **T7.2 — `get_plan_status` coach tool** — structured plan-vs-actual (read
+  active plan + TDEE + latest trend, call `plan_status`), any fired Alert
+  surfaced verbatim. No prose, no math. Register in `TOOLS`. ← **NEXT**
+- [ ] **T7.3 — CLI** — `coach plan set (--rate | --goal-weight --by) [--goal-weight]
+  [--protein]` / `coach plan status`; `coach status` gains a plan line. `plan set`
+  computes+clamps the rate, anchors start weight from the trend, inserts.
+- [ ] **T7.4 — remaining tests** — `get_plan_status` tool (DB assembly +
+  insufficient paths); CLI `plan set`/`status` smoke; `plan set` deadline→clamp
+  path end-to-end.
 
 ## Phase 6B — MyFitnessPal CSV backfill (still valid, secondary)
 
