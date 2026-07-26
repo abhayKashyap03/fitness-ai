@@ -7,28 +7,60 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **304 tests green; ruff + mypy clean. Schema at v9** (migrations 0001–0009).
-  On `main` after PRs #12–#14 merged; working tree clean.
-- Phases 0–6A done. WHOOP + MFP (food+weight) run **live**; the coach (`coach
-  ask`) answers grounded questions live. Recovery + sleep + weight + food show
-  together on one `coach status` screen — the §1 thesis, working.
+- **328 tests green; ruff + mypy clean. Schema at v10** (migrations 0001–0010).
+  On `main` after PRs #12–#16 merged; working tree clean.
+- Phases 0–7 done. WHOOP + MFP (food+weight) run **live**; the coach (`coach
+  ask`) answers grounded questions live; and it now **steers** — a cut/bulk plan
+  sets a daily calorie goal + timeline + adherence. `coach eval grounding` and
+  `eval hrv` both pass. Recovery + sleep + weight + food + plan show together on
+  one `coach status` screen — the §1 thesis, working, in daily use.
 - **Data types all have a canonical home:** recovery (0001), workout, food
-  (0006), weight/body-comp (0005/0007), sleep (0009). `raw_events` is sacred and
-  append-only; `normalize --rebuild` proven **byte-identical on the real DB**.
+  (0006), weight/body-comp (0005/0007), sleep (0009), plan (0010 — first
+  user-authored table). `raw_events` is sacred and append-only; `normalize
+  --rebuild` proven **byte-identical on the real DB**.
 - **LLM layer is provider-agnostic** (§2.5 applied to vendors): Google Gemini
   (default, free tier), Anthropic, and xAI Grok — each a different wire shape,
   one module apiece, agent loop vendor-blind. Grounding verified 3/3 on Grok.
 - CLI surface: `db init|status|backup|verify`, `auth whoop`, `ingest
-  whoop|healthkit|mfp`, `normalize [--rebuild]`, `status`, `tdee`, `ask`,
-  `eval grounding|hrv`, `doctor`, `sync`.
+  whoop|healthkit|mfp`, `normalize [--rebuild]`, `status`, `tdee`, `plan
+  set|status`, `ask`, `eval grounding|hrv`, `doctor`, `sync`.
 - **GateGuard disabled** via `.claude/settings.local.json` — **user-authorized
   2026-07-19; do NOT re-flag** the §8.2 tension. File stays untracked.
 - **Open item (unchanged):** `~/.zshrc` plaintext API keys flagged, unrotated —
   user's call, do not act.
 
-### What's next → see [TASKS.md](TASKS.md) ▶ NEXT UP and [DECISIONS_NEEDED.md](DECISIONS_NEEDED.md) D5
-The big one is **Phase 7 — the cut/bulk plan layer** (the first thing that
-*steers* rather than observes), blocked on the D5 target-model decision.
+### What's next → see [TASKS.md](TASKS.md) ▶ NEXT UP
+The big open item is the **BLE hardware spike** (Adapter B, ADR-0012) — the
+subscription-survival play; needs the physical MG strap. The plan layer's daily
+calorie goal fills in once TDEE crosses 10 logged-intake days (no code).
+
+---
+
+## Session 2026-07-26 (b) — Phase 7: the cut/bulk plan layer (PR #16, merged)
+
+The first thing that *steers* rather than observes. D5 resolved as **option C**
+([ADR-0013](docs/adr/0013-plan-target-model.md)): a signed target rate is the one
+canonical driver; a goal-weight+deadline is convenience that reduces to a
+§8.6-clamped rate. Deterministic all the way — the LLM narrates the goal, code
+computes it (§2.2), clamped by the guardrails (§8.6).
+
+- **Migration 0010 (schema v10)** — `plan` table, the first USER-AUTHORED table
+  (not raw-derived; no raw_ref, absent from the rebuild/fingerprint). Append-only
+  history, one `is_active` row per user. `store/plan.py`.
+- **`compute/plan.py`** (pure) — daily calorie goal = adaptive TDEE + the rate's
+  energy delta (KCAL_PER_KG), through the calorie-floor clamp; timeline
+  projection; `Insufficient` without TDEE/trend. `guardrails.clamp_target_loss_rate`
+  makes an unsafe deadline safe at set time (timeline stretches, honestly).
+- **`get_plan_status`** — 7th coach tool, so `coach ask` reasons about adherence.
+- **CLI** — `coach plan set (--rate | --goal-weight --by | --maintain) [--protein]`,
+  `coach plan status`, plan line in `coach status`.
+- **Mid-cut adoption** — `plan set --start-date/--start-weight` backdates the
+  anchor; `plan_status` then reports progress + a deterministic adherence label
+  (on_track/ahead/behind/wrong_way). A same-day plan shows no progress yet (§2.7).
+- **Live-verified** (T7.5): set/status/adherence work on the real DB. The daily
+  calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
+  (ADR-0005) — by design, fills in with a few more days.
+- +26 plan tests. **328 tests green; ruff + mypy clean.**
 
 ---
 

@@ -63,7 +63,9 @@ coach ingest mfp   --since <date>  # first MFP backfill (diary + weight)
 coach sync                         # the daily driver: WHOOP + MFP + normalize
 coach status [--date YYYY-MM-DD]   # one day's rollup (recovery/food/weight/training)
 coach tdee                         # adaptive TDEE from weight trend + logged intake
-coach ask "how am I doing?"        # the coach — grounded in YOUR data via tools
+coach plan set --rate -0.5 --goal-weight 78   # set a cut/bulk plan (ADR-0013)
+coach plan status                  # daily calorie goal + timeline + adherence
+coach ask "am I on track for my cut?"         # the coach — grounded in YOUR data
 
 coach db backup                    # consistent online snapshot
 coach db verify                    # integrity + row counts + rebuild fingerprint
