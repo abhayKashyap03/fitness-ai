@@ -14,7 +14,13 @@ import pytest
 
 from coach.coach.agent import ask
 from coach.coach.grounding import fabricated_numbers, run_live_grounding
-from coach.coach.llm import AnthropicProvider, ApiError, GoogleProvider, build_provider
+from coach.coach.llm import (
+    AnthropicProvider,
+    ApiError,
+    GoogleProvider,
+    GrokProvider,
+    build_provider,
+)
 
 WEIGH_DAY = "2026-01-02"
 
@@ -128,8 +134,58 @@ class GoogleScript:
         return cls._resp("MAX_TOKENS", [{"text": t}])
 
 
-SCRIPTS = [AnthropicScript, GoogleScript]
-SCRIPT_IDS = ["anthropic", "google"]
+class GrokScript:
+    """Builds Grok/OpenAI-shaped responses and providers."""
+
+    provider_cls = GrokProvider
+
+    @staticmethod
+    def build(transport):
+        return GrokProvider("k", transport=transport, sleep=lambda _s: None)
+
+    @staticmethod
+    def _resp(finish, message, usage=None):
+        return (
+            200,
+            {
+                "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                "usage": usage or {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+        )
+
+    @classmethod
+    def text(cls, t):
+        return cls._resp("stop", {"role": "assistant", "content": t})
+
+    @classmethod
+    def tool(cls, name, args):
+        # arguments arrive as a JSON STRING, unlike the other two providers
+        return cls._resp(
+            "tool_calls",
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)},
+                    }
+                ],
+            },
+        )
+
+    @classmethod
+    def refusal(cls):
+        return cls._resp("content_filter", {"role": "assistant", "content": ""})
+
+    @classmethod
+    def truncated(cls, t):
+        return cls._resp("length", {"role": "assistant", "content": t})
+
+
+SCRIPTS = [AnthropicScript, GoogleScript, GrokScript]
+SCRIPT_IDS = ["anthropic", "google", "grok"]
 
 
 @pytest.fixture
@@ -272,6 +328,133 @@ def test_google_tool_schema_is_openapi_subset():
     assert params["properties"]["end"]["type"] == "STRING"
     assert params["properties"]["window"]["type"] == "INTEGER"
     assert "minimum" not in params["properties"]["window"]  # stripped
+
+
+def test_grok_system_is_a_message_and_key_is_bearer():
+    """OpenAI shape: no top-level `system` field; auth is a Bearer header."""
+    from coach.coach.llm import UserTurn
+
+    tr = FakeTransport([GrokScript.text("hi")])
+    GrokProvider("SECRET-XAI-KEY", transport=tr).complete(
+        system="SYS", turns=[UserTurn("q")], tools=[]
+    )
+    body = tr.requests[0]
+    assert "system" not in body and "systemInstruction" not in body
+    assert body["messages"][0] == {"role": "system", "content": "SYS"}
+    assert body["messages"][1] == {"role": "user", "content": "q"}
+    assert tr.headers[0]["Authorization"] == "Bearer SECRET-XAI-KEY"
+    assert "SECRET-XAI-KEY" not in tr.urls[0]  # key never in the URL (§8.4)
+
+
+def test_grok_tool_results_fan_out_to_one_message_each():
+    """Anthropic/Gemini pack results into ONE message; OpenAI needs one each,
+    matched by tool_call_id."""
+    from coach.coach.llm import ToolResult, ToolResultTurn, UserTurn
+
+    tr = FakeTransport([GrokScript.text("ok")])
+    turns = [
+        UserTurn("q"),
+        ToolResultTurn(
+            [
+                ToolResult("call_a", "get_daily_status", {"kcal": 1}),
+                ToolResult("call_b", "get_weight_trend", "boom", is_error=True),
+            ]
+        ),
+    ]
+    GrokProvider("k", transport=tr).complete(system="s", turns=turns, tools=[])
+    msgs = tr.requests[0]["messages"]
+    tool_msgs = [m for m in msgs if m["role"] == "tool"]
+    assert len(tool_msgs) == 2
+    assert [m["tool_call_id"] for m in tool_msgs] == ["call_a", "call_b"]
+    assert json.loads(tool_msgs[0]["content"]) == {"kcal": 1}
+    assert tool_msgs[1]["content"] == "boom"  # error payload passed through as-is
+
+
+def test_grok_tool_arguments_json_string_is_parsed():
+    """`function.arguments` is a JSON STRING on the wire, a dict canonically."""
+    tr = FakeTransport([GrokScript.tool("get_weight_trend", {"window": 14})])
+    resp = GrokProvider("k", transport=tr).complete(system="s", turns=[], tools=[])
+    assert resp.stop_reason == "tool_use"
+    assert resp.tool_uses[0].args == {"window": 14}
+    assert resp.tool_uses[0].id == "call_1"
+
+
+def test_grok_malformed_tool_arguments_do_not_crash():
+    bad = (
+        200,
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "function": {"name": "get_daily_status", "arguments": "{oops"},
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {},
+        },
+    )
+    tr = FakeTransport([bad])
+    resp = GrokProvider("k", transport=tr).complete(system="s", turns=[], tools=[])
+    assert resp.tool_uses[0].args == {}  # degrades, the tool layer reports it
+
+
+def test_grok_tool_schema_passes_through_unmodified():
+    """Unlike Gemini, OpenAI-shaped tools take plain JSON Schema verbatim."""
+    from coach.coach.tools import tool_specs
+
+    tr = FakeTransport([GrokScript.text("hi")])
+    GrokProvider("k", transport=tr).complete(system="s", turns=[], tools=tool_specs())
+    fns = tr.requests[0]["tools"]
+    window_tool = next(f for f in fns if f["function"]["name"] == "get_weight_trend")
+    params = window_tool["function"]["parameters"]
+    assert window_tool["type"] == "function"
+    assert params["type"] == "object"  # lower-case, NOT upper-cased
+    assert params["properties"]["window"]["minimum"] == 1  # kept, not stripped
+    assert tr.requests[0]["tool_choice"] == "auto"
+
+
+def test_grok_usage_splits_cached_from_input():
+    tr = FakeTransport(
+        [
+            GrokScript._resp(
+                "stop",
+                {"role": "assistant", "content": "hi"},
+                usage={
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "prompt_tokens_details": {"cached_tokens": 40},
+                },
+            )
+        ]
+    )
+    resp = GrokProvider("k", transport=tr).complete(system="s", turns=[], tools=[])
+    assert resp.usage.input_tokens == 60
+    assert resp.usage.cached_input_tokens == 40
+    assert resp.usage.output_tokens == 20
+
+
+def test_grok_error_never_leaks_the_key():
+    tr = FakeTransport([(401, {"error": {"code": "invalid_api_key", "message": "bad key"}})])
+    provider = GrokProvider("SECRET-XAI-KEY", transport=tr, sleep=lambda _s: None)
+    with pytest.raises(ApiError) as exc:
+        provider.complete(system="s", turns=[], tools=[])
+    assert "SECRET-XAI-KEY" not in str(exc.value)
+    assert exc.value.status == 401
+
+
+def test_grok_bare_string_error_body_is_handled():
+    tr = FakeTransport([(400, {"error": "plain string error"})])
+    with pytest.raises(ApiError, match="plain string error"):
+        GrokProvider("k", transport=tr, sleep=lambda _s: None).complete(
+            system="s", turns=[], tools=[]
+        )
 
 
 def test_google_usage_splits_cached_from_input():

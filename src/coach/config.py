@@ -38,17 +38,17 @@ class Settings:
     mfp_session_cookie: str = field(default="", repr=False)
     anthropic_api_key: str = field(default="", repr=False)
     google_api_key: str = field(default="", repr=False)
-    llm_provider: str = "google"  # 'google' (free tier) | 'anthropic'
+    xai_api_key: str = field(default="", repr=False)
+    llm_provider: str = "google"  # 'google' (free tier) | 'anthropic' | 'grok'
     coach_model: str = ""  # empty -> provider default (see coach.coach.llm)
 
     @property
     def llm_api_key(self) -> str:
         """The API key for the configured provider (never logged, §8.4)."""
-        return (
-            self.anthropic_api_key
-            if self.llm_provider == "anthropic"
-            else self.google_api_key
-        )
+        return {
+            "anthropic": self.anthropic_api_key,
+            "grok": self.xai_api_key,
+        }.get(self.llm_provider, self.google_api_key)
 
     def require_llm(self) -> None:
         """Raise a clear error if the configured provider's API key is absent."""
@@ -63,6 +63,12 @@ class Settings:
             raise ConfigError(
                 "GOOGLE_API_KEY is missing (COACH_LLM_PROVIDER=google). "
                 "Create a free-tier key at https://aistudio.google.com/apikey "
+                "and add it to .env (see .env.example)."
+            )
+        if self.llm_provider == "grok" and not self.xai_api_key:
+            raise ConfigError(
+                "XAI_API_KEY is missing (COACH_LLM_PROVIDER=grok). "
+                "Billed per token (§8.7). Create one at https://console.x.ai "
                 "and add it to .env (see .env.example)."
             )
 
@@ -140,9 +146,10 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
         raise ConfigError(f"COACH_UNITS must be 'metric' or 'imperial', got {units!r}.")
 
     provider = _get(env, "COACH_LLM_PROVIDER", required=False, default="google").lower()
-    if provider not in {"google", "anthropic"}:
+    if provider not in {"google", "anthropic", "grok"}:
         raise ConfigError(
-            f"COACH_LLM_PROVIDER must be 'google' or 'anthropic', got {provider!r}."
+            "COACH_LLM_PROVIDER must be 'google', 'anthropic', or 'grok', "
+            f"got {provider!r}."
         )
 
     return Settings(
@@ -162,6 +169,7 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
         mfp_session_cookie=_get(env, "MFP_SESSION_COOKIE", required=False),
         anthropic_api_key=_get(env, "ANTHROPIC_API_KEY", required=False),
         google_api_key=_get(env, "GOOGLE_API_KEY", required=False),
+        xai_api_key=_get(env, "XAI_API_KEY", required=False),
         llm_provider=provider,
         # empty -> the provider's own default model (coach.coach.llm)
         coach_model=_get(env, "COACH_MODEL", required=False),

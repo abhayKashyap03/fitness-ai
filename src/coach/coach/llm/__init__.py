@@ -28,12 +28,14 @@ from .base import (
     UserTurn,
 )
 from .google import GoogleProvider
+from .grok import GrokProvider
 
 # name -> constructor. Typed as returning the protocol so a new provider only
 # has to satisfy LLMProvider, not inherit any particular base.
 PROVIDERS: dict[str, Callable[..., LLMProvider]] = {
     "google": GoogleProvider,
     "anthropic": AnthropicProvider,
+    "grok": GrokProvider,
 }
 
 __all__ = [
@@ -42,6 +44,7 @@ __all__ = [
     "ApiError",
     "AssistantTurn",
     "GoogleProvider",
+    "GrokProvider",
     "LLMProvider",
     "LLMResponse",
     "ToolResult",
