@@ -33,7 +33,7 @@ from .base import (
 )
 
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_MODEL = "gemini-2.5-flash"  # free tier; override with COACH_MODEL
+DEFAULT_MODEL = "gemini-3.6-flash"  # free tier; override with COACH_MODEL
 
 _RETRYABLE = frozenset({429, 500, 503})
 
