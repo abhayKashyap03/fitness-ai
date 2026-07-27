@@ -155,13 +155,10 @@ def _ensure_migrated(conn) -> None:
 
 
 def _whoop_client(settings: Settings) -> WhoopClient:
-    oauth = WhoopOAuth(
-        settings.whoop_client_id,
-        settings.whoop_client_secret,
-        settings.whoop_redirect_uri,
-    )
-    store = TokenStore(whoop_token_path(settings.user_id))
-    return WhoopClient(lambda: oauth.valid_access_token(store))
+    # Wiring lives in the service layer so the web UI shares it (services.clients).
+    from ..services.clients import whoop_client
+
+    return whoop_client(settings)
 
 
 def _cmd_ingest_whoop(settings: Settings, args: argparse.Namespace) -> int:
@@ -219,18 +216,9 @@ def _cmd_ingest_healthkit(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def _mfp_client(settings: Settings):
-    from ..adapters.myfitnesspal.auth import MfpAuth, MfpTokenStore
-    from ..adapters.myfitnesspal.client import MfpClient
-    from ..paths import mfp_token_path
+    from ..services.clients import mfp_client
 
-    auth = MfpAuth(settings.mfp_session_cookie)
-    store = MfpTokenStore(mfp_token_path(settings.user_id))
-
-    def creds() -> tuple[str, str]:
-        tok = auth.valid_token(store)
-        return tok.access_token, tok.user_id
-
-    return MfpClient(creds)
+    return mfp_client(settings)
 
 
 def _cmd_ingest_mfp(settings: Settings, args: argparse.Namespace) -> int:

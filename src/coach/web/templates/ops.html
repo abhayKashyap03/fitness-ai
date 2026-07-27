@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% set nav = 'ops' %}
+{% block title %}Coach · Ops{% endblock %}
+
+{% block content %}
+<h1>Ops</h1>
+<p class="note">Everything <code>coach</code> does from the terminal. Long jobs run in the
+  background — leave the page open to watch, or come back and re-check.
+  Jobs live in this process only: restarting the server forgets their history.</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>Daily driver</h2>
+    <p class="note">Incremental WHOOP + MyFitnessPal (food + weight), then normalize.
+      Sources that aren't configured skip cleanly instead of failing the run.</p>
+    <p><button data-job="sync" data-url="/api/jobs/sync">Run sync</button></p>
+  </div>
+
+  <div class="card">
+    <h2>Backfill a window</h2>
+    <p class="note">For history the daily path missed. Leave dates empty to resume from
+      the last ingest (WHOOP) or the past week (MFP).</p>
+    <label>Since</label><input type="date" id="since">
+    <label>Until</label><input type="date" id="until">
+    <p>
+      <button data-job="ingest-whoop" data-url="/api/jobs/ingest/whoop" data-dates="1">Ingest WHOOP</button>
+      <button data-job="ingest-mfp" data-url="/api/jobs/ingest/mfp" data-dates="1">Ingest MFP</button>
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Normalize</h2>
+    <p class="note">Re-derive canonical rows from raw. <strong>Rebuild</strong> re-derives
+      everything — safe by design (raw is the source of truth and is never touched),
+      but it takes longer.</p>
+    <p>
+      <button data-job="normalize" data-url="/api/jobs/normalize">Incremental</button>
+      <button data-job="normalize" data-url="/api/jobs/normalize" data-rebuild="1"
+              data-confirm="Re-derive ALL canonical rows from raw? raw_events is untouched.">Rebuild</button>
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Database</h2>
+    <p class="note">Backup writes a consistent snapshot. Verify runs an integrity check,
+      row counts and the canonical fingerprint.</p>
+    <p>
+      <button id="btnBackup">Backup</button>
+      <button id="btnVerify">Verify</button>
+    </p>
+    <div id="dbOut" class="note"></div>
+  </div>
+
+  <div class="card">
+    <h2>Evaluations</h2>
+    <p class="note"><strong>HRV</strong> is deterministic and free. <strong>Grounding</strong>
+      calls the live model and burns API tokens (§8.7).</p>
+    <p>
+      <button id="btnHrv">HRV validation</button>
+      <button data-job="eval-grounding" data-url="/api/jobs/eval-grounding"
+              data-confirm="Run the live grounding eval? This calls the model and burns tokens.">Grounding (tokens)</button>
+    </p>
+    <div id="hrvOut" class="note"></div>
+  </div>
+
+  <div class="card">
+    <h2>Not available here</h2>
+    <p class="note"><code>coach auth whoop</code> stays in the terminal — the OAuth flow
+      redirects to a local callback and can't be driven from this page. Run it once;
+      the token auto-refreshes afterwards.</p>
+  </div>
+</div>
+
+<h2 style="margin-top:1.5rem">Jobs</h2>
+<div id="jobs"></div>
+
+<script>
+const jobsEl = document.getElementById('jobs');
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `request failed (${res.status})`);
+  return data;
+}
+
+document.querySelectorAll('button[data-url]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const confirmMsg = btn.dataset.confirm;
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    const body = {};
+    if (btn.dataset.rebuild) body.rebuild = true;
+    if (btn.dataset.dates) {
+      body.since = document.getElementById('since').value;
+      body.until = document.getElementById('until').value;
+    }
+    btn.disabled = true;
+    try {
+      await post(btn.dataset.url, body);
+      refresh();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+
+document.getElementById('btnBackup').addEventListener('click', async () => {
+  const out = document.getElementById('dbOut');
+  out.textContent = 'backing up…';
+  try {
+    const d = await post('/api/db/backup');
+    out.textContent = `backup written: ${d.path} (${Math.round(d.bytes / 1024)} KiB)`;
+  } catch (err) { out.textContent = err.message; }
+});
+
+document.getElementById('btnVerify').addEventListener('click', async () => {
+  const out = document.getElementById('dbOut');
+  out.textContent = 'verifying…';
+  const res = await fetch('/api/db/verify');
+  const d = await res.json();
+  const counts = Object.entries(d.counts).map(([k, v]) => `${k}=${v}`).join('  ');
+  out.textContent = `integrity=${d.integrity} · fk violations=${d.fk_violations} · ` +
+    `fingerprint ${String(d.fingerprint).slice(0, 16)}…\n${counts}`;
+  out.style.whiteSpace = 'pre-wrap';
+});
+
+document.getElementById('btnHrv').addEventListener('click', async () => {
+  const out = document.getElementById('hrvOut');
+  out.textContent = 'computing…';
+  const res = await fetch('/api/eval/hrv');
+  const d = await res.json();
+  out.style.whiteSpace = 'pre-wrap';
+  out.textContent = `${d.hrv_days} HRV days over ${d.window_days}d\n` +
+    `verdict: ${String(d.verdict).toUpperCase()} — ${d.rationale}`;
+});
+
+function jobCard(j) {
+  const cls = {running: '', ok: 'good', failed: 'bad'}[j.status] || '';
+  const lines = (j.lines || []).map(l => escapeHtml(l)).join('\n');
+  return `<div class="card" style="margin-bottom:.6rem">
+    <div class="row"><span class="k">${escapeHtml(j.name)}</span>
+      <span class="v"><span class="pill ${cls}">${j.status}</span></span></div>
+    ${lines ? `<pre class="note" style="white-space:pre-wrap;margin:.5rem 0 0">${lines}</pre>` : ''}
+    ${j.error ? `<div class="alert critical">${escapeHtml(j.error)}</div>` : ''}
+  </div>`;
+}
+
+async function refresh() {
+  const res = await fetch('/api/jobs');
+  const d = await res.json();
+  jobsEl.innerHTML = d.jobs.length
+    ? d.jobs.map(jobCard).join('')
+    : '<p class="absent">no jobs run yet this session</p>';
+  // Poll only while something is actually running — no idle churn.
+  if (d.jobs.some(j => j.status === 'running')) setTimeout(refresh, 1200);
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+refresh();
+</script>
+{% endblock %}
