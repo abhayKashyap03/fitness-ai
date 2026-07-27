@@ -82,9 +82,22 @@ An occasional Apple Health export ingests with
 
 ### Web dashboard
 
-`coach web` serves a local dashboard — the daily "single circle", weight trend,
-plan status, and the coach chat — over the same deterministic compute the CLI
-uses ([ADR-0014](docs/adr/0014-local-web-ui.md)). It needs the optional extra:
+`coach web` serves a local dashboard over the same deterministic compute the CLI
+uses ([ADR-0014](docs/adr/0014-local-web-ui.md)) — and it exposes essentially the
+whole CLI, so a terminal is only needed to start it:
+
+| Page | What |
+|---|---|
+| Dashboard | the daily "single circle" + plan goal + TDEE + weight trend |
+| Plan | view the cut/bulk plan, set/adjust it (clamped by §8.6 in code) |
+| Coach | grounded chat, showing which tools answered |
+| Ops | sync, backfill ingest, normalize/rebuild, db backup/verify, evals |
+| Doctor | config/db/token/ingest-freshness diagnosis |
+
+Long operations run as background jobs you can watch. `coach auth whoop` stays
+CLI-only — its OAuth flow needs a browser redirect to a local callback.
+
+It needs the optional extra:
 
 ```bash
 pip install -e ".[web]"
