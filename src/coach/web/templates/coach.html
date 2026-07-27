@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% set nav = 'coach' %}
+{% block title %}Coach · Ask{% endblock %}
+
+{% block content %}
+<h1>Ask the coach</h1>
+<p class="note">Grounded in your data via the same deterministic tools the CLI uses —
+  every number comes from compute, never from the model (§2.2). Provider:
+  <strong>{{ provider }}</strong>. Burns API tokens.</p>
+
+<div class="card">
+  <form id="askForm">
+    <label>Question</label>
+    <textarea id="q" rows="3" placeholder="Am I on track for my cut?"></textarea>
+    <p><button type="submit" id="go">Ask</button></p>
+  </form>
+</div>
+
+<div id="out" style="margin-top:1rem"></div>
+
+<script>
+const out = document.getElementById('out');
+const go = document.getElementById('go');
+
+document.getElementById('askForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const question = document.getElementById('q').value.trim();
+  if (!question) return;
+
+  go.disabled = true;
+  go.textContent = 'Thinking…';
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = '<h2>' + escapeHtml(question) + '</h2><p class="note">…</p>';
+  out.prepend(card);
+
+  try {
+    const res = await fetch('/api/ask', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      card.innerHTML = '<h2>' + escapeHtml(question) + '</h2>' +
+        '<div class="err">' + escapeHtml(data.detail || 'request failed') + '</div>';
+    } else {
+      // Show which tools ran: the grounding is the product, so make it visible.
+      const tools = (data.tool_calls || [])
+        .map(c => '<span class="pill">' + escapeHtml(c.name) + '</span>').join(' ');
+      card.innerHTML = '<h2>' + escapeHtml(question) + '</h2>' +
+        '<div>' + escapeHtml(data.answer).replace(/\n/g, '<br>') + '</div>' +
+        (tools ? '<p style="margin-top:.8rem">' + tools + '</p>' : '');
+    }
+  } catch (err) {
+    card.innerHTML = '<h2>' + escapeHtml(question) + '</h2>' +
+      '<div class="err">' + escapeHtml(String(err)) + '</div>';
+  } finally {
+    go.disabled = false;
+    go.textContent = 'Ask';
+    document.getElementById('q').value = '';
+  }
+});
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+</script>
+{% endblock %}

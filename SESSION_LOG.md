@@ -7,11 +7,12 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **328 tests green; ruff + mypy clean. Schema at v10** (migrations 0001–0010).
-  On `main` after PRs #12–#16 merged; working tree clean.
-- Phases 0–7 done. WHOOP + MFP (food+weight) run **live**; the coach (`coach
-  ask`) answers grounded questions live; and it now **steers** — a cut/bulk plan
-  sets a daily calorie goal + timeline + adherence. `coach eval grounding` and
+- **344 tests green; ruff + mypy clean. Schema at v10** (migrations 0001–0010).
+  PRs #12–#19 merged; #20 (web UI) open.
+- Phases 0–7.5 done. WHOOP + MFP (food+weight) run **live**; the coach (`coach
+  ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
+  daily calorie goal + timeline + adherence; and there is now a **local web
+  dashboard** (`coach web`, ADR-0014). `coach eval grounding` and
   `eval hrv` both pass. Recovery + sleep + weight + food + plan show together on
   one `coach status` screen — the §1 thesis, working, in daily use.
 - **Data types all have a canonical home:** recovery (0001), workout, food
@@ -23,7 +24,7 @@
   one module apiece, agent loop vendor-blind. Grounding verified 3/3 on Grok.
 - CLI surface: `db init|status|backup|verify`, `auth whoop`, `ingest
   whoop|healthkit|mfp`, `normalize [--rebuild]`, `status`, `tdee`, `plan
-  set|status`, `ask`, `eval grounding|hrv`, `doctor`, `sync`.
+  set|status`, `ask`, `eval grounding|hrv`, `doctor`, `sync`, `web`.
 - **GateGuard disabled** via `.claude/settings.local.json` — **user-authorized
   2026-07-19; do NOT re-flag** the §8.2 tension. File stays untracked.
 - **Open item (unchanged):** `~/.zshrc` plaintext API keys flagged, unrotated —
@@ -61,6 +62,39 @@ computes it (§2.2), clamped by the guardrails (§8.6).
   calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
   (ADR-0005) — by design, fills in with a few more days.
 - +26 plan tests. **328 tests green; ruff + mypy clean.**
+
+---
+
+## Session 2026-07-26 (c) — the first UI: local web dashboard (PR #20)
+
+§3's gate ("prove the spine before any UI") was met, so the UI got built. This
+**lifts two explicit CLAUDE.md bans** — §11 (UI, web servers) and §6.4 (web
+frameworks) — scoped to a *local single-user* UI and recorded in
+[ADR-0014](docs/adr/0014-local-web-ui.md); both sections amended to point there.
+Auth/billing/multi-tenancy stay out of scope.
+
+- **`src/coach/web/`** — FastAPI + Jinja templates. A **presentation boundary
+  exactly like the CLI**: every number comes from `coach/tools.py`; no arithmetic
+  or domain logic in a route or template (§2.2). That rule is the thing to guard
+  — putting logic in the UI because it's faster than adding a tested compute
+  function is the obvious failure mode.
+- **Absence renders as absence** (§2.7) — "NOT LOGGED" never becomes `0`;
+  insufficient data shows its need/have marker.
+- **`/api/*` is a pass-through of the tool layer** — the same contract the future
+  iOS app (P13) consumes, now exercised against real data. A test asserts
+  byte-equality with the tool handler so it can't drift.
+- **Pages** — dashboard (single circle + plan + TDEE + weight sparkline), plan
+  view/set, coach chat. `coach web` binds **127.0.0.1** by default; any other
+  `--host` warns (no auth on personal health data).
+- Deps behind the optional **`[web]` extra**; core CLI still 3 dependencies.
+- **344 tests green** (+16 web), ruff + mypy clean. **Live-verified**: all routes
+  200 on the real DB, real recovery/sleep/weight/food rendering, TDEE honestly
+  reporting `need 10, have 8`.
+- Known nits, deliberately not fixed here: `plan_status`'s insufficient marker
+  reads `need 1, have 0` where the TDEE card says `need 10, have 8` (honest but
+  less informative — propagate the underlying marker in compute later);
+  `ruff format` fails repo-wide on 30 pre-existing files, untouched to avoid
+  unrelated churn.
 
 ---
 

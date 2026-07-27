@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% set nav = 'dash' %}
+{% block title %}Coach · {{ day }}{% endblock %}
+
+{% block content %}
+<div class="daynav">
+  <a href="/?date={{ prev_day }}">←</a>
+  <h1 style="margin:0">{{ day }}</h1>
+  <a href="/?date={{ next_day }}">→</a>
+</div>
+
+{# Safety first: code-enforced §8.6 flags are surfaced plainly, never buried. #}
+{{ m.alerts(safety.alerts) }}
+
+{% set p = plan.plan %}
+{% set ps = plan.status %}
+<div class="card" style="margin-bottom:1rem">
+  <h2>Plan</h2>
+  {% if not p %}
+    <p class="note">No active plan. <a href="/plan">Set one</a> to get a daily calorie goal.</p>
+  {% else %}
+    <div class="row">
+      <span class="k">{{ p.direction }} at {{ m.signed(p.target_rate_pct_per_week, '%/week') }}</span>
+      {% if ps and ps.adherence %}
+        <span class="pill {{ {'on_track':'good','ahead':'good','behind':'warn','wrong_way':'bad'}.get(ps.adherence,'') }}">
+          {{ ps.adherence.replace('_',' ') }}
+        </span>
+      {% endif %}
+    </div>
+    {% if ps %}
+      <div class="big">{{ m.val(ps.calorie_goal_kcal, ' kcal', 0) }}<span class="note"> / day</span></div>
+      <div class="row"><span class="k">vs TDEE</span><span class="v">{{ m.signed(ps.daily_kcal_delta, ' kcal', 0) }}</span></div>
+      {% if ps.floor_clamped %}<div class="alert">Clamped up to the calorie floor (§8.6).</div>{% endif %}
+      {% if ps.projected_goal_day %}
+        <div class="row"><span class="k">projected</span><span class="v">{{ ps.goal_weight_kg }}kg by {{ ps.projected_goal_day }}</span></div>
+      {% endif %}
+      {% if ps.adherence %}
+        <div class="row"><span class="k">progress</span>
+          <span class="v">{{ m.signed(ps.kg_changed_so_far, ' kg') }} over {{ ps.elapsed_days }}d
+            ({{ m.signed(ps.actual_rate_kg_per_week, ' kg/wk', 3) }})</span></div>
+      {% endif %}
+      {{ m.alerts(ps.alerts) }}
+    {% else %}
+      <p class="note">Daily goal: {{ m.insufficient(plan.insufficient) }}<br>
+        <span class="note">TDEE needs ~10 logged-intake days before a goal is honest.</span></p>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Recovery</h2>
+    {% if status.recovery %}
+      <div class="big">{{ m.val(status.recovery.score, '', 0) }}</div>
+      <div class="row"><span class="k">HRV</span><span class="v">{{ m.val(status.recovery.hrv_rmssd_ms, ' ms') }}</span></div>
+      <div class="row"><span class="k">resting HR</span><span class="v">{{ m.val(status.recovery.resting_hr_bpm, ' bpm', 0) }}</span></div>
+      <div class="row"><span class="k">source</span><span class="v note">{{ status.recovery.source }}</span></div>
+    {% else %}<p class="absent">no recovery record for this day</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Sleep</h2>
+    {% if status.sleep %}
+      <div class="big">{{ m.val(status.sleep.in_bed_min, ' min', 0) }}</div>
+      <div class="row"><span class="k">deep / REM</span><span class="v">{{ m.val(status.sleep.sws_min, '', 0) }} / {{ m.val(status.sleep.rem_min, ' min', 0) }}</span></div>
+      <div class="row"><span class="k">efficiency</span><span class="v">{{ m.val(status.sleep.efficiency_pct, '%') }}</span></div>
+      <div class="row"><span class="k">source</span><span class="v note">{{ status.sleep.source }}</span></div>
+    {% else %}<p class="absent">no sleep record for this day</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Weight</h2>
+    {% if status.weight %}
+      <div class="big">{{ m.val(status.weight.weight_kg, ' kg', 2) }}</div>
+      <div class="row"><span class="k">trend (EWMA)</span><span class="v">{{ m.val(status.weight.trend_kg, ' kg', 2) }}</span></div>
+      <div class="row"><span class="k">source</span><span class="v note">{{ status.weight.source }}</span></div>
+    {% else %}
+      <p class="absent">not weighed this day</p>
+      <div class="row"><span class="k">latest trend</span><span class="v">{{ m.val(weight.latest_trend_kg, ' kg', 2) }}</span></div>
+    {% endif %}
+    <svg id="spark" viewBox="0 0 300 60" preserveAspectRatio="none"
+         style="width:100%;height:60px;margin-top:.6rem"><path class="line"/></svg>
+    <div class="note" id="sparkNote">30-day trend</div>
+  </div>
+
+  <div class="card">
+    <h2>Food</h2>
+    {% set f = status.food %}
+    {% if not f.logged %}
+      {# "not logged" and "ate nothing" are different facts (§2.7). #}
+      <p class="absent">NOT LOGGED — this is not the same as zero</p>
+    {% elif f.is_fast %}
+      <div class="big">0 kcal</div><p class="note">declared fast</p>
+    {% else %}
+      <div class="big">{{ m.val(f.kcal, ' kcal', 0) }}</div>
+      <div class="row"><span class="k">protein</span><span class="v">{{ m.val(f.protein_g, ' g', 0) }}</span></div>
+      <div class="row"><span class="k">carbs</span><span class="v">{{ m.val(f.carbs_g, ' g', 0) }}</span></div>
+      <div class="row"><span class="k">fat</span><span class="v">{{ m.val(f.fat_g, ' g', 0) }}</span></div>
+      {% if not f.is_complete %}<p class="note">⚠ incomplete — some macros missing</p>{% endif %}
+      <div class="row"><span class="k">source</span><span class="v note">{{ f.source }}</span></div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Training</h2>
+    {% set t = status.training %}
+    <div class="big">{{ t.sessions }}<span class="note"> session{{ '' if t.sessions == 1 else 's' }}</span></div>
+    <div class="row"><span class="k">strain</span><span class="v">{{ m.val(t.strain) }}</span></div>
+    <div class="row"><span class="k">active kcal</span><span class="v">{{ m.val(t.kcal_active, '', 0) }}</span></div>
+    <div class="row"><span class="k">duration</span><span class="v">{{ m.val(t.duration_s, ' s', 0) }}</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Adaptive TDEE</h2>
+    {% if tdee.estimate %}
+      <div class="big">{{ m.val(tdee.estimate.tdee_kcal, ' kcal', 0) }}</div>
+      <div class="row"><span class="k">mean intake</span><span class="v">{{ m.val(tdee.estimate.mean_intake_kcal, ' kcal', 0) }}</span></div>
+      <div class="row"><span class="k">Δ trend weight</span><span class="v">{{ m.signed(tdee.estimate.trend_delta_kg, ' kg', 3) }} / {{ tdee.estimate.span_days }}d</span></div>
+      <div class="row"><span class="k">logged days</span><span class="v">{{ tdee.estimate.intake_days }}</span></div>
+    {% else %}
+      <p>{{ m.insufficient(tdee.insufficient) }}</p>
+      <p class="note">Estimated from weight trend + logged intake — not wearable calories (ADR-0005).</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if status.notes %}
+<div class="card" style="margin-top:1rem">
+  <h2>Notes</h2>
+  {% for n in status.notes %}<div class="note">· {{ n }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<script>
+// Sparkline: renders trend values the compute layer already produced.
+// Scaling to pixels is presentation; no health number is derived here.
+fetch('/api/weight-trend?end={{ day }}&window=30')
+  .then(r => r.json())
+  .then(d => {
+    const pts = d.series.filter(p => p.trend_kg !== null);
+    if (pts.length < 2) { document.getElementById('sparkNote').textContent =
+      'trend chart needs at least 2 days'; return; }
+    const ys = pts.map(p => p.trend_kg);
+    const lo = Math.min(...ys), hi = Math.max(...ys), span = (hi - lo) || 1;
+    const path = pts.map((p, i) => {
+      const x = (i / (pts.length - 1)) * 300;
+      const y = 55 - ((p.trend_kg - lo) / span) * 50;
+      return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    document.querySelector('#spark .line').setAttribute('d', path);
+    document.getElementById('sparkNote').textContent =
+      `${pts.length}-day trend · ${lo.toFixed(2)}–${hi.toFixed(2)} kg`;
+  });
+</script>
+{% endblock %}

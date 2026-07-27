@@ -9,10 +9,11 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ## ▶ NEXT UP (start here — updated 2026-07-26)
 
-State: **328 tests green · ruff + mypy clean · schema v10 · on `main` after PRs #12–#16 merged.**
-Phases 0–7 done. The coach answers grounded questions live, and now *steers*: a
-cut/bulk plan sets a daily calorie goal + adherence. Evals pass. Running daily on
-real data. **Full roadmap (CLI → iOS app → public): [docs/ROADMAP.md](docs/ROADMAP.md)**
+State: **344 tests green · ruff + mypy clean · schema v10 · PRs #12–#19 merged.**
+Phases 0–7.5 done. The coach answers grounded questions live, *steers* (cut/bulk
+plan → daily calorie goal + adherence), and now has a **local web dashboard**
+(`coach web`, ADR-0014). Evals pass. Running daily on real data.
+**Full roadmap (CLI → iOS app → public): [docs/ROADMAP.md](docs/ROADMAP.md)**
 (mirrors the Notion Project Task Board). What's left near-term, in priority order:
 
 1. **🧑 BLE hardware spike (Adapter B)** — the biggest open item and the

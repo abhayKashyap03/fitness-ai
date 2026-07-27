@@ -16,10 +16,22 @@ dependencies = [
 coach = "coach.cli.main:main"
 
 [project.optional-dependencies]
+# Local web UI (ADR-0014). Optional on purpose: the core CLI keeps its
+# three-dependency footprint, and CLI-only users install none of this.
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",  # FastAPI's required backend for HTML form posts
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
 ]
 
 [build-system]
@@ -28,6 +40,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Jinja templates ship with the package so a non-editable install can serve the UI.
+[tool.setuptools.package-data]
+coach = ["web/templates/*.html"]
 
 # Migrations live in schema/migrations/ at the repo root and are located at
 # runtime relative to the package (see coach.store.paths). This is a local,
@@ -45,7 +61,14 @@ ignore = ["E501"]  # line length handled by formatter; long SQL/URLs tolerated
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # starlette's TestClient asks for `httpx2`; we already depend on httpx for the
+    # adapters and won't add a second HTTP client for test infrastructure. This is
+    # a third-party test-harness deprecation, not our code — ignored by message so
+    # `error` still applies to everything else, including any of our own warnings.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
 
 [tool.mypy]
 python_version = "3.14"

@@ -67,6 +67,8 @@ coach plan set --rate -0.5 --goal-weight 78   # set a cut/bulk plan (ADR-0013)
 coach plan status                  # daily calorie goal + timeline + adherence
 coach ask "am I on track for my cut?"         # the coach — grounded in YOUR data
 
+coach web                          # local dashboard at http://127.0.0.1:8000
+
 coach db backup                    # consistent online snapshot
 coach db verify                    # integrity + row counts + rebuild fingerprint
 coach doctor                       # config/db/token sanity report
@@ -77,6 +79,32 @@ coach normalize --rebuild          # re-derive ALL canonical rows from raw
 
 An occasional Apple Health export ingests with
 `coach ingest healthkit --file export.zip` (or `coach sync --hk-file …`).
+
+### Web dashboard
+
+`coach web` serves a local dashboard over the same deterministic compute the CLI
+uses ([ADR-0014](docs/adr/0014-local-web-ui.md)) — and it exposes essentially the
+whole CLI, so a terminal is only needed to start it:
+
+| Page | What |
+|---|---|
+| Dashboard | the daily "single circle" + plan goal + TDEE + weight trend |
+| Plan | view the cut/bulk plan, set/adjust it (clamped by §8.6 in code) |
+| Coach | grounded chat, showing which tools answered |
+| Ops | sync, backfill ingest, normalize/rebuild, db backup/verify, evals |
+| Doctor | config/db/token/ingest-freshness diagnosis |
+
+Long operations run as background jobs you can watch. `coach auth whoop` stays
+CLI-only — its OAuth flow needs a browser redirect to a local callback.
+
+It needs the optional extra:
+
+```bash
+pip install -e ".[web]"
+```
+
+It **binds `127.0.0.1` by default**: this serves personal health data with no
+authentication, so exposing it on a network is a deliberate `--host` opt-in.
 
 ## Data & privacy
 

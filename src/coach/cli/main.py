@@ -155,13 +155,10 @@ def _ensure_migrated(conn) -> None:
 
 
 def _whoop_client(settings: Settings) -> WhoopClient:
-    oauth = WhoopOAuth(
-        settings.whoop_client_id,
-        settings.whoop_client_secret,
-        settings.whoop_redirect_uri,
-    )
-    store = TokenStore(whoop_token_path(settings.user_id))
-    return WhoopClient(lambda: oauth.valid_access_token(store))
+    # Wiring lives in the service layer so the web UI shares it (services.clients).
+    from ..services.clients import whoop_client
+
+    return whoop_client(settings)
 
 
 def _cmd_ingest_whoop(settings: Settings, args: argparse.Namespace) -> int:
@@ -219,18 +216,9 @@ def _cmd_ingest_healthkit(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def _mfp_client(settings: Settings):
-    from ..adapters.myfitnesspal.auth import MfpAuth, MfpTokenStore
-    from ..adapters.myfitnesspal.client import MfpClient
-    from ..paths import mfp_token_path
+    from ..services.clients import mfp_client
 
-    auth = MfpAuth(settings.mfp_session_cookie)
-    store = MfpTokenStore(mfp_token_path(settings.user_id))
-
-    def creds() -> tuple[str, str]:
-        tok = auth.valid_token(store)
-        return tok.access_token, tok.user_id
-
-    return MfpClient(creds)
+    return mfp_client(settings)
 
 
 def _cmd_ingest_mfp(settings: Settings, args: argparse.Namespace) -> int:
@@ -811,6 +799,41 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_web(settings: Settings, args: argparse.Namespace) -> int:
+    """Serve the local dashboard (ADR-0014).
+
+    Binds localhost by default: this serves personal health data with no
+    authentication, so exposing it on a network must be a deliberate act.
+    """
+    try:
+        import uvicorn
+
+        from ..web.app import create_app
+    except ImportError as exc:
+        print(
+            f"The web UI needs the optional [web] extra ({exc.name} missing).\n"
+            "  pip install -e \".[web]\"",
+            file=sys.stderr,
+        )
+        return 2
+
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+    finally:
+        conn.close()
+
+    if args.host not in {"127.0.0.1", "localhost"}:
+        print(
+            f"WARNING: binding {args.host} exposes your health data on the network "
+            "with NO authentication. Use only on a network you trust.",
+            file=sys.stderr,
+        )
+    print(f"Dashboard: http://{args.host}:{args.port}  (Ctrl-C to stop)")
+    uvicorn.run(create_app(settings), host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="coach", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -942,6 +965,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_pst.add_argument("--window", type=int, default=14, help="TDEE window in days")
     p_pst.add_argument("--json", action="store_true", help="machine-readable output")
     p_pst.set_defaults(func=_cmd_plan_status)
+
+    p_web = sub.add_parser("web", help="serve the local dashboard (needs the [web] extra)")
+    p_web.add_argument(
+        "--host", default="127.0.0.1",
+        help="bind address (default localhost; anything else exposes health data un-authed)",
+    )
+    p_web.add_argument("--port", type=int, default=8000, help="port (default 8000)")
+    p_web.set_defaults(func=_cmd_web)
 
     return parser
 

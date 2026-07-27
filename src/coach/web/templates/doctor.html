@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set nav = 'doctor' %}
+{% block title %}Coach · Doctor{% endblock %}
+
+{% block content %}
+<h1>Doctor</h1>
+<p class="note">Config, database, credentials and ingest freshness. Read-only —
+  diagnosing never changes anything, and no secret value is ever shown (§8.4).</p>
+
+<div class="card" style="margin-bottom:1rem">
+  <div class="row">
+    <span class="k">status</span>
+    <span class="v">
+      {% if rep.ok %}<span class="pill good">all clear</span>
+      {% else %}<span class="pill bad">{{ rep.problems }} problem{{ '' if rep.problems == 1 else 's' }}</span>{% endif %}
+    </span>
+  </div>
+  <div class="row"><span class="k">database</span><span class="v note">{{ rep.db_path }}</span></div>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>Checks</h2>
+  {% for c in rep.checks %}
+    <div class="row">
+      <span class="k">{{ c.label }}</span>
+      <span class="v">
+        <span class="pill {{ {'ok':'good','warn':'warn','problem':'bad'}[c.status] }}">{{ c.status }}</span>
+        {{ c.detail }}
+      </span>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>Raw events by source</h2>
+  {% if not rep.raw_counts %}
+    <p class="absent">unavailable — the schema isn't ready</p>
+  {% else %}
+    {% for r in rep.raw_counts %}
+      <div class="row">
+        <span class="k">{{ r.source }}</span>
+        <span class="v">{{ r.rows }} rows ·
+          {% if r.last_ingest %}last ingest {{ r.last_ingest }}
+          {% else %}<span class="absent">never ingested</span>{% endif %}
+        </span>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+
+<p class="note" style="margin-top:1rem">
+  <strong>Still CLI-only:</strong> <code>coach auth whoop</code> — the OAuth flow needs a
+  browser redirect to a local callback, which can't be driven from this page. Run it in a
+  terminal once; the token then auto-refreshes.
+</p>
+{% endblock %}
