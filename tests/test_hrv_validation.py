@@ -73,7 +73,7 @@ def test_lag1_autocorrelation_pairs_only_consecutive_days():
 
 
 def test_lagged_pairs_skips_missing_days_no_interpolation():
-    a = _days(1, [1.0, 2.0, 3.0])          # 03-01..03-03
+    a = _days(1, [1.0, 2.0, 3.0])  # 03-01..03-03
     b = {**_days(2, [10.0]), "2026-03-04": 30.0}  # 03-02 and 03-04 only
     xs, ys = lagged_pairs(a, b, lag_days=1)
     # 03-01 -> 03-02 ok; 03-02 -> 03-03 missing in b; 03-03 -> 03-04 ok
@@ -196,3 +196,53 @@ def test_report_carries_a_verdict(migrated_conn):
     # empty DB -> autocorr insufficient -> verdict insufficient, never a fake call
     assert rep.verdict == INSUFFICIENT
     assert rep.rationale
+
+
+# ---- training-minutes probe (better-powered than strain) --------------------
+
+
+def _seed_workout(conn, wid, day, source, duration_s, grp=None, strain=None):
+    conn.execute(
+        "INSERT INTO workout (id, user_id, source, external_id, sport_type, "
+        "start_at, end_at, day_key, duration_s, strain, session_group_id, derived_at) "
+        "VALUES (?,1,?,?,'walk',?,?,?,?,?,?,'2026-01-01T00:00:00+00:00')",
+        (
+            wid,
+            source,
+            wid,
+            f"{day}T08:00:00+00:00",
+            f"{day}T09:00:00+00:00",
+            day,
+            duration_s,
+            strain,
+            grp,
+        ),
+    )
+
+
+def test_training_minutes_counts_a_shared_session_once(migrated_conn):
+    """A session logged in MFP AND detected by the strap is ONE session's load."""
+    for i in range(MIN_PAIRS + 2):
+        day = f"2026-03-{i + 1:02d}"
+        _seed_recovery(migrated_conn, day, hrv=50.0 + (i % 5), score=60.0)
+        grp = f"grp:{day}"
+        _seed_workout(migrated_conn, f"w{i}", day, "whoop_api", 1800, grp=grp, strain=10.0)
+        _seed_workout(migrated_conn, f"m{i}", day, "myfitnesspal", 1800, grp=grp)
+    migrated_conn.commit()
+
+    rep = hrv_validation_report(migrated_conn, end="2026-03-30", window=90)
+    # both rows are 30 min in ONE group -> 30 training minutes, not 60
+    assert isinstance(rep.dev_vs_next_train_min, Correlation | Insufficient)
+    total = migrated_conn.execute(
+        "SELECT SUM(mins) AS v FROM (SELECT MAX(duration_s)/60.0 AS mins FROM workout "
+        "WHERE day_key='2026-03-05' GROUP BY COALESCE(session_group_id, id))"
+    ).fetchone()["v"]
+    assert total == pytest.approx(30.0)
+
+
+def test_training_probe_is_insufficient_without_workouts(migrated_conn):
+    for i in range(20):
+        _seed_recovery(migrated_conn, f"2026-03-{i + 1:02d}", hrv=50.0 + i, score=60.0)
+    migrated_conn.commit()
+    rep = hrv_validation_report(migrated_conn, end="2026-03-30", window=90)
+    assert isinstance(rep.dev_vs_next_train_min, Insufficient)

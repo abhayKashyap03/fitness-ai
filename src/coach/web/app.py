@@ -492,6 +492,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "lag1_autocorr": corr(rep.hrv_lag1_autocorr),
             "dev_vs_next_score": corr(rep.dev_vs_next_score),
             "dev_vs_next_strain": corr(rep.dev_vs_next_strain),
+            "dev_vs_next_train_min": corr(rep.dev_vs_next_train_min),
             "verdict": rep.verdict,
             "rationale": rep.rationale,
         }

@@ -524,6 +524,7 @@ def _cmd_eval_hrv(settings: Settings, args: argparse.Namespace) -> int:
     print(f"  lag-1 autocorrelation:    {_fmt_corr(rep.hrv_lag1_autocorr)}")
     print(f"  dev% -> next-day score:   {_fmt_corr(rep.dev_vs_next_score)}")
     print(f"  dev% -> next-day strain:  {_fmt_corr(rep.dev_vs_next_strain)}")
+    print(f"  dev% -> next-day train:   {_fmt_corr(rep.dev_vs_next_train_min)}")
     # data-driven verdict, not a static legend (§2.2: thresholds are code)
     label = {"signal": "SIGNAL", "noise": "NOISE", "insufficient": "INSUFFICIENT"}
     print(f"\n  verdict: {label.get(rep.verdict, rep.verdict.upper())} — {rep.rationale}")
