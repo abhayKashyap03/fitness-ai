@@ -71,9 +71,7 @@ ADHERENCE_TOL_FRAC = 0.25
 MAINTAIN_DRIFT_KG_PER_WEEK = 0.15
 
 
-def adherence_label(
-    actual_rate_kg_per_week: float, target_rate_kg_per_week: float
-) -> str:
+def adherence_label(actual_rate_kg_per_week: float, target_rate_kg_per_week: float) -> str:
     """Coarse on-track call from actual vs target weekly rate (both signed)."""
     if target_rate_kg_per_week == 0:
         return (
@@ -101,9 +99,7 @@ def direction_for_rate(rate_pct_per_week: float) -> str:
     return "maintain"
 
 
-def rate_from_deadline(
-    *, current_weight_kg: float, goal_weight_kg: float, weeks: float
-) -> float:
+def rate_from_deadline(*, current_weight_kg: float, goal_weight_kg: float, weeks: float) -> float:
     """Signed %/week rate implied by reaching ``goal`` from ``current`` in ``weeks``.
 
     Pure conversion (NOT yet clamped — callers pass the result through
@@ -145,7 +141,7 @@ def plan_status(
     direction: str,
     target_rate_pct_per_week: float,
     goal_weight_kg: float | None,
-    tdee_kcal: float | None,
+    tdee_kcal: float | Insufficient | None,
     current_trend_kg: float | None,
     end_day: str | None = None,
     start_day_key: str | None = None,
@@ -164,6 +160,11 @@ def plan_status(
     today, or one backdated by a mid-cut user, both read honestly (a same-day
     plan simply has no progress to show yet, §2.7).
     """
+    # Propagate the REAL reason rather than a generic marker: callers already
+    # know why TDEE is unavailable ("need 10 logged-intake days, have 8"), and
+    # flattening that to "need 1, have 0" tells the user nothing actionable.
+    if isinstance(tdee_kcal, Insufficient):
+        return tdee_kcal
     if tdee_kcal is None or current_trend_kg is None:
         return Insufficient(have=0, needed=1)
 

@@ -247,7 +247,8 @@ def get_plan_status(
     }
 
     est = estimate_tdee(build_window(conn, end, window, user_id))
-    tdee_kcal = None if isinstance(est, Insufficient) else est.tdee_kcal
+    # Pass the marker through unflattened so the caller learns WHAT is missing.
+    tdee_kcal = est if isinstance(est, Insufficient) else est.tdee_kcal
     row = conn.execute(
         "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
         "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",

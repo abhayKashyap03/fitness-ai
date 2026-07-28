@@ -307,4 +307,6 @@ def test_get_plan_status_tool_insufficient_without_data(migrated_conn):
     assert out["plan"] is not None
     assert out["plan"]["direction"] == "cut"
     assert out["status"] is None
-    assert out["insufficient"] == {"have": 0, "needed": 1}
+    # The REAL reason propagates (TDEE needs 10 logged-intake days), not a
+    # flattened "need 1, have 0" that tells the user nothing actionable.
+    assert out["insufficient"] == {"have": 0, "needed": 10}
