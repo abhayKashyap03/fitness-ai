@@ -7,7 +7,7 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **410 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
+- **415 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
   PRs #12–#19 merged; #20 (web UI) and #21 (MFP training + watermark) open.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
@@ -102,8 +102,20 @@ fix was written (systematic-debugging, not guessing).
   `must_state_numbers` + `omitted_numbers()`; an always-refuse model now provably
   fails the present-data scenarios.
 
+- **HRV probe with real power.** The strain probe is capped at n=24 by WHOOP
+  coverage (strain is WHOOP-only). Training DURATION comes from every source and
+  81 MFP sessions just appeared, so `dev_vs_next_train_min` tests the same
+  hypothesis with more data — counted once per session group. Live r=+0.072
+  (n=28); **verdict still NOISE**. The extra power did not rescue the
+  differentiator, which is exactly the honest answer risk #6 asks for.
+- **Session detail.** The rollup said "N session(s)" and nothing else, so what
+  was actually trained stayed invisible. `compute.training_sessions()` + a
+  `get_training_sessions` tool (8th) + a list under `coach status` + the
+  dashboard training card + `/api/training`. One compute function, three surfaces.
+
 Live-verified: today's walk shows (203 kcal / 2700s); 2026-07-23 reports MFP's
-745 kcal / 8160s with WHOOP's strain 15.55 intact; groups 152 → 123.
+745 kcal / 8160s with WHOOP's strain 15.55 intact, listing 'Strength training'
+97min/398kcal and 'Walking, 2.0 mph' 39min/347kcal; groups 152 → 123.
 
 ---
 

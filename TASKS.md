@@ -9,7 +9,7 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ## ▶ NEXT UP (start here — updated 2026-07-26)
 
-State: **410 tests green · ruff + mypy clean · schema v11 · PRs #12–#19 merged; #20, #21 open.**
+State: **415 tests green · ruff + mypy clean · schema v11 · PRs #12–#19 merged; #20, #21 open.**
 Phases 0–7.5 done. The coach answers grounded questions live, *steers* (cut/bulk
 plan → daily calorie goal + adherence), and now has a **local web dashboard**
 (`coach web`, ADR-0014). Evals pass. Running daily on real data.
