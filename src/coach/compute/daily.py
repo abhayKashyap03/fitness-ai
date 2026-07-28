@@ -75,6 +75,19 @@ class TrainingSummary:
 
 
 @dataclass(frozen=True)
+class SessionSummary:
+    """One real training session (already deduped across sources)."""
+
+    sport_type: str
+    source: str
+    description: str | None  # what the source called it, when it says
+    start_at: str
+    duration_s: int | None
+    kcal_active: float | None
+    strain: float | None  # WHOOP-only; None when no strap row joined the group
+
+
+@dataclass(frozen=True)
 class DailyStatus:
     day_key: str
     user_id: int
@@ -200,6 +213,53 @@ def _training(conn: sqlite3.Connection, day: str, uid: int) -> TrainingSummary:
         duration_s=int(dur) if dur is not None else None,
         strain=strain_row["total"] if strain_row else None,
     )
+
+
+def training_sessions(
+    conn: sqlite3.Connection, day_key: str, user_id: int = 1
+) -> list[SessionSummary]:
+    """The day's sessions, one row per real session (§5 dedup already applied).
+
+    The aggregate in :class:`TrainingSummary` answers "how much"; this answers
+    "what". Same representative rule as the rollup — MyFitnessPal wins a shared
+    session (ADR-0015) — and `strain` is carried from whichever row in the group
+    actually has it, so a strap-measured value survives an MFP representative.
+    """
+    rows = conn.execute(
+        f"""
+        WITH ranked AS (
+          SELECT *,
+                 COALESCE(session_group_id, id) AS grp,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY COALESCE(session_group_id, id)
+                   ORDER BY {_SOURCE_RANK}, id
+                 ) AS rnk
+          FROM workout WHERE user_id=? AND day_key=?
+        ),
+        grp_strain AS (
+          SELECT COALESCE(session_group_id, id) AS grp, MAX(strain) AS s
+          FROM workout WHERE user_id=? AND day_key=? GROUP BY COALESCE(session_group_id, id)
+        )
+        SELECT r.sport_type, r.source, r.source_sport_raw, r.start_at,
+               r.duration_s, r.kcal_active, g.s AS strain
+        FROM ranked r JOIN grp_strain g ON g.grp = r.grp
+        WHERE r.rnk = 1
+        ORDER BY r.start_at
+        """,
+        (user_id, day_key, user_id, day_key),
+    ).fetchall()
+    return [
+        SessionSummary(
+            sport_type=r["sport_type"],
+            source=r["source"],
+            description=r["source_sport_raw"],
+            start_at=r["start_at"],
+            duration_s=r["duration_s"],
+            kcal_active=r["kcal_active"],
+            strain=r["strain"],
+        )
+        for r in rows
+    ]
 
 
 def daily_status(conn: sqlite3.Connection, day_key: str, user_id: int = 1) -> DailyStatus:

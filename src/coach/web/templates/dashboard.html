@@ -109,6 +109,17 @@
     <div class="row"><span class="k">strain</span><span class="v">{{ m.val(t.strain) }}</span></div>
     <div class="row"><span class="k">active kcal</span><span class="v">{{ m.val(t.kcal_active, '', 0) }}</span></div>
     <div class="row"><span class="k">duration</span><span class="v">{{ m.val(t.duration_s, ' s', 0) }}</span></div>
+    {% if sessions.sessions %}
+      <hr style="border:0;border-top:1px solid var(--line);margin:.6rem 0">
+      {% for s in sessions.sessions %}
+        <div class="row">
+          <span class="k">{{ s.description or s.sport_type }}</span>
+          <span class="v">{{ m.val((s.duration_s / 60) if s.duration_s else None, ' min', 0) }}
+            · {{ m.val(s.kcal_active, ' kcal', 0) }}
+            <span class="note">[{{ s.source }}]</span></span>
+        </div>
+      {% endfor %}
+    {% endif %}
   </div>
 
   <div class="card">

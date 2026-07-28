@@ -22,7 +22,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from ..compute.daily import daily_status
+from ..compute.daily import daily_status, training_sessions
 from ..compute.guardrails import Alert, TrendPoint, weight_loss_rate_alert
 from ..compute.plan import plan_status
 from ..compute.tdee import build_window, estimate_tdee
@@ -223,6 +223,17 @@ def get_safety_flags(
     return {"end": end, "window": window, "alerts": alerts, "insufficient": insufficient}
 
 
+def get_training_sessions(conn: sqlite3.Connection, *, date: str, user_id: int = 1) -> dict:
+    """The day's individual training sessions, deduped across sources (§5).
+
+    ``get_daily_status`` gives the day's totals; this gives what was actually
+    done. Empty list = no session recorded, which is a true zero (unlike food,
+    where not-logged and zero are different facts).
+    """
+    sessions = [asdict(s) for s in training_sessions(conn, date, user_id=user_id)]
+    return {"date": date, "sessions": sessions, "count": len(sessions)}
+
+
 def get_plan_status(
     conn: sqlite3.Connection, *, end: str, window: int = 14, user_id: int = 1
 ) -> dict:
@@ -359,6 +370,16 @@ TOOLS: list[ToolSpec] = [
         handler=get_safety_flags,
     ),
     ToolSpec(
+        name="get_training_sessions",
+        description=(
+            "The individual training sessions recorded on a day (sport, duration, "
+            "calories, source), already deduped so one real workout seen by two "
+            "sources is listed once. An empty list means no session was recorded."
+        ),
+        input_schema={"type": "object", "properties": {"date": _DAY}},
+        handler=get_training_sessions,
+    ),
+    ToolSpec(
         name="get_plan_status",
         description=(
             "The user's active cut/bulk plan vs measured state: today's calorie "
@@ -379,7 +400,10 @@ _BY_NAME = {t.name: t for t in TOOLS}
 
 # per-tool name of its day anchor (filled with the server-side "today" when the
 # model omits it — the model must never have to guess the current date, §2.2)
-_DAY_ARG = {t.name: ("date" if t.name == "get_daily_status" else "end") for t in TOOLS}
+_DAY_ARG = {
+    t.name: ("date" if t.name in {"get_daily_status", "get_training_sessions"} else "end")
+    for t in TOOLS
+}
 
 
 def tool_specs() -> list[LLMToolSpec]:

@@ -230,3 +230,70 @@ def test_ungrouped_sessions_still_count_separately(migrated_conn):
     t = daily_status(migrated_conn, day).training
     assert t.sessions == 2
     assert t.kcal_active == pytest.approx(450.0)
+
+
+# ---- session detail ---------------------------------------------------------
+
+
+def test_training_sessions_lists_one_row_per_real_session(migrated_conn):
+    """The rollup says how much; this says what — deduped the same way."""
+    from coach.compute.daily import training_sessions
+
+    day, grp = "2026-07-23", "grp:1:strength:z"
+    _wk(
+        migrated_conn,
+        "w1",
+        "whoop_api",
+        "strength",
+        f"{day}T22:39:00+00:00",
+        day,
+        kcal=240.0,
+        dur=1800,
+        strain=15.5,
+        grp=grp,
+    )
+    _wk(
+        migrated_conn,
+        "m1",
+        "myfitnesspal",
+        "strength",
+        f"{day}T11:30:00+00:00",
+        day,
+        kcal=500.0,
+        dur=5400,
+        strain=None,
+        grp=grp,
+    )
+    _wk(
+        migrated_conn,
+        "m2",
+        "myfitnesspal",
+        "walk",
+        f"{day}T08:30:00+00:00",
+        day,
+        kcal=150.0,
+        dur=900,
+        strain=None,
+        grp="grp:other",
+    )
+    migrated_conn.commit()
+
+    out = training_sessions(migrated_conn, day)
+    assert len(out) == 2  # the shared strength session is listed once
+    strength = next(s for s in out if s.sport_type == "strength")
+    assert strength.source == "myfitnesspal"  # MFP owns training (ADR-0015)
+    assert strength.kcal_active == pytest.approx(500.0)
+    assert strength.strain == pytest.approx(15.5)  # ...strap metric still carried
+
+
+def test_training_sessions_empty_day(migrated_conn):
+    from coach.compute.daily import training_sessions
+
+    assert training_sessions(migrated_conn, "2026-07-20") == []
+
+
+def test_get_training_sessions_tool_shape(migrated_conn):
+    from coach.coach.tools import get_training_sessions
+
+    out = get_training_sessions(migrated_conn, date="2026-07-20")
+    assert out == {"date": "2026-07-20", "sessions": [], "count": 0}
