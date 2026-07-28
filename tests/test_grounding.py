@@ -19,14 +19,42 @@ from coach.coach.grounding import (
     run_live_grounding,
 )
 
-# per-scenario predicate: is the metric the query asks about honestly ABSENT
-# in the tool output the model would ground on?
-_HONEST_ABSENCE = {
+# Per-scenario predicate over the tool output the model would ground on.
+#
+# For an absence scenario this asserts the metric really IS absent (the tool must
+# not mask it). For a present-data scenario it asserts the value really IS there
+# — otherwise "the model must state 455" would be an impossible demand and the
+# eval would flag a faithful refusal as a failure.
+_SUBSTRATE = {
     "recovery_absent": lambda o: o["recovery"] is None,
     "tdee_without_food": lambda o: o["estimate"] is None and o["insufficient"] is not None,
-    "food_not_logged_is_not_zero": lambda o: o["food"]["logged"] is False
-    and o["food"]["kcal"] is None,
+    "food_not_logged_is_not_zero": lambda o: (
+        o["food"]["logged"] is False and o["food"]["kcal"] is None
+    ),
+    # present-data: the numbers the answer must quote are actually served
+    "recovery_present_must_be_reported": lambda o: (
+        o["recovery"] is not None
+        and o["recovery"]["score"] == 71.0
+        and o["recovery"]["hrv_rmssd_ms"] == 62.0
+    ),
+    "sleep_present_must_be_reported": lambda o: (
+        o["sleep"] is not None and o["sleep"]["in_bed_min"] == 455.0
+    ),
+    # mixed: calories present, protein genuinely absent — both halves must hold
+    "missing_macro_must_not_be_invented": lambda o: (
+        o["food"]["kcal"] == 1800.0 and o["food"]["protein_g"] is None
+    ),
+    # a plan exists, but no TDEE -> the goal must come back insufficient
+    "calorie_goal_without_tdee": lambda o: (
+        o["plan"] is not None and o["status"] is None and o["insufficient"] is not None
+    ),
+    "no_plan_set": lambda o: o["plan"] is None and o["status"] is None,
+    # zero sessions is a TRUE zero (unlike food, where 0 != not-logged)
+    "training_absent": lambda o: o["training"]["sessions"] == 0,
+    # one weigh-in is not a trend: a single point can't establish direction
+    "weight_trend_from_a_single_point": lambda o: len(o["series"]) <= 1,
 }
+_HONEST_ABSENCE = _SUBSTRATE  # back-compat for existing assertions
 
 
 # ---- assertion helpers -----------------------------------------------------
@@ -59,14 +87,14 @@ def test_system_prompt_keeps_faithfulness_clauses():
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.name)
 def test_scenarios_are_well_formed(scenario):
     assert scenario.tool in {t.name for t in tools.TOOLS}
-    assert scenario.name in _HONEST_ABSENCE  # every scenario has a checker
+    assert scenario.name in _SUBSTRATE  # every scenario has a substrate check
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.name)
-def test_tool_substrate_is_honestly_absent(migrated_conn, scenario):
+def test_tool_substrate_matches_the_scenario(migrated_conn, scenario):
     scenario.seed(migrated_conn)
     out = tools.dispatch(migrated_conn, scenario.tool, scenario.tool_args)
-    assert _HONEST_ABSENCE[scenario.name](out), f"{scenario.name}: tool masked the absence"
+    assert _SUBSTRATE[scenario.name](out), f"{scenario.name}: substrate does not match the scenario"
 
 
 # ---- live runner surfaces API failures (offline; injected transport) -------
