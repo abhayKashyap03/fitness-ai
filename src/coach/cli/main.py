@@ -294,7 +294,7 @@ def _today(settings: Settings) -> str:
 
 
 def _cmd_status(settings: Settings, args: argparse.Namespace) -> int:
-    from ..compute.daily import daily_status
+    from ..compute.daily import daily_status, training_sessions
 
     date = args.date or _today(settings)
     conn = db.connect(settings.db_path)
@@ -307,6 +307,7 @@ def _cmd_status(settings: Settings, args: argparse.Namespace) -> int:
             print(_json.dumps(get_daily_status(conn, date=date, user_id=settings.user_id)))
             return 0
         s = daily_status(conn, date, user_id=settings.user_id)
+        sessions = training_sessions(conn, date, user_id=settings.user_id)
     finally:
         conn.close()
 
@@ -349,6 +350,13 @@ def _cmd_status(settings: Settings, args: argparse.Namespace) -> int:
         f"  training: {t.sessions} session(s) "
         f"kcal={_fmt(t.kcal_active)} dur={_fmt(t.duration_s, 's')} strain={_fmt(t.strain)}"
     )
+    for sess in sessions:
+        mins = f"{sess.duration_s / 60:.0f}min" if sess.duration_s else "—"
+        label = sess.description or sess.sport_type
+        print(
+            f"    · {sess.sport_type:8} {mins:>7}  {_fmt(sess.kcal_active, ' kcal')}"
+            f"  [{sess.source}] {label}"
+        )
     _print_plan_line(settings, date)
     for n in s.notes:
         print(f"    · {n}")
@@ -524,6 +532,7 @@ def _cmd_eval_hrv(settings: Settings, args: argparse.Namespace) -> int:
     print(f"  lag-1 autocorrelation:    {_fmt_corr(rep.hrv_lag1_autocorr)}")
     print(f"  dev% -> next-day score:   {_fmt_corr(rep.dev_vs_next_score)}")
     print(f"  dev% -> next-day strain:  {_fmt_corr(rep.dev_vs_next_strain)}")
+    print(f"  dev% -> next-day train:   {_fmt_corr(rep.dev_vs_next_train_min)}")
     # data-driven verdict, not a static legend (§2.2: thresholds are code)
     label = {"signal": "SIGNAL", "noise": "NOISE", "insufficient": "INSUFFICIENT"}
     print(f"\n  verdict: {label.get(rep.verdict, rep.verdict.upper())} — {rep.rationale}")

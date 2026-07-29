@@ -58,7 +58,10 @@ def test_auth_failure_in_one_source_does_not_kill_the_other(migrated_conn, setti
     configured = Settings(**{**settings.__dict__, "whoop_client_id": "id",
                              "whoop_client_secret": "sec", "mfp_session_cookie": "ck"})
     # both have a prior-ingest watermark so they attempt a real ingest
-    monkeypatch.setattr("coach.services.sync.whoop_auto_since", lambda _c: "2026-06-01")
+    monkeypatch.setattr(
+        "coach.services.sync.whoop_auto_since_by_type",
+        lambda _c: {"recovery": "2026-06-01", "workout": "2026-06-01"},
+    )
     monkeypatch.setattr("coach.services.sync.mfp_auto_since", lambda _c: "2026-06-01")
 
     def whoop_dies(_s):

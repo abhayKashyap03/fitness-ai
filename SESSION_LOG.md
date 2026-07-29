@@ -7,9 +7,9 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **344 tests green; ruff + mypy clean. Schema at v10** (migrations 0001–0010).
-  PRs #12–#19 merged; #20 (web UI) open.
-- Phases 0–7.5 done. WHOOP + MFP (food+weight) run **live**; the coach (`coach
+- **415 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
+  PRs #12–#19 merged; #20 (web UI) and #21 (MFP training + watermark) open.
+- Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
   daily calorie goal + timeline + adherence; and there is now a **local web
   dashboard** (`coach web`, ADR-0014). `coach eval grounding` and
@@ -62,6 +62,60 @@ computes it (§2.2), clamped by the guardrails (§8.6).
   calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
   (ADR-0005) — by design, fills in with a few more days.
 - +26 plan tests. **328 tests green; ruff + mypy clean.**
+
+---
+
+## Session 2026-07-27 — MFP training, sync watermark, source ownership (PR #21)
+
+Two bugs the user reported, both root-caused against the REAL database before any
+fix was written (systematic-debugging, not guessing).
+
+- **MFP training was invisible.** MFP diaries carry `exercise_entry` items beside
+  the food rows; the normalizer filtered to `diary_meal` only — right for not
+  fabricating food calories, but nothing ever picked the exercise up. A walk
+  logged in MFP reached `raw_events` and stopped. `parse_exercise` + migration
+  0011 (drops the `workout.source` CHECK per ADR-0009). **Recovered 81 sessions
+  back to 2026-01-06.** Not treated as workouts: `is_calorie_adjustment` rows
+  (device burn adjustments) and entries with no usable duration.
+- **Sync re-fetched the same days forever.** `auto_since` took the MIN across
+  record types, so a QUIET type pinned every window open: no workouts since 07-23
+  meant recovery/sleep/cycle re-fetched from 07-21 every run. `auto_since_by_type`
+  resumes each type from its own watermark.
+- **Cross-source double-counting, found while verifying.** 23 days had the same
+  session in both sources. MFP start times are placeholders (every walk at 08:30,
+  months apart) so time-window dedup can never match them — both rows survived and
+  compute counted the workout AND its calories twice (§5's expected bug class).
+  `_absorb_placeholder_time_sources` folds hand-logged rows into the strap group
+  for the same day+sport. Trade-off documented in code: two genuinely distinct
+  same-sport sessions collapse into one; under-counting is the safer error.
+- **ADR-0015 — source-domain ownership (user's rule).** MyFitnessPal is
+  authoritative for training AND food; WHOOP is the recovery instrument
+  (HRV/sleep/skin-temp) and its auto-detected workouts are a by-product, not the
+  training log. `_SOURCE_RANK` puts MFP first. **`strain` is the documented
+  exception** — WHOOP-only, aggregated separately once per group, so flipping the
+  ranking can never silently drop a health metric. CLAUDE.md §12 + README both
+  said the opposite and were corrected.
+- **Plan insufficient marker** now propagates the real reason ("need 10, have 9")
+  instead of flattening to "need 1, have 0".
+- **Grounding eval made two-sided** (3 → 10 scenarios). It only tested absence, so
+  a model that always said "I don't have that" scored a perfect run. Added
+  `must_state_numbers` + `omitted_numbers()`; an always-refuse model now provably
+  fails the present-data scenarios.
+
+- **HRV probe with real power.** The strain probe is capped at n=24 by WHOOP
+  coverage (strain is WHOOP-only). Training DURATION comes from every source and
+  81 MFP sessions just appeared, so `dev_vs_next_train_min` tests the same
+  hypothesis with more data — counted once per session group. Live r=+0.072
+  (n=28); **verdict still NOISE**. The extra power did not rescue the
+  differentiator, which is exactly the honest answer risk #6 asks for.
+- **Session detail.** The rollup said "N session(s)" and nothing else, so what
+  was actually trained stayed invisible. `compute.training_sessions()` + a
+  `get_training_sessions` tool (8th) + a list under `coach status` + the
+  dashboard training card + `/api/training`. One compute function, three surfaces.
+
+Live-verified: today's walk shows (203 kcal / 2700s); 2026-07-23 reports MFP's
+745 kcal / 8160s with WHOOP's strain 15.55 intact, listing 'Strength training'
+97min/398kcal and 'Walking, 2.0 mph' 39min/347kcal; groups 152 → 123.
 
 ---
 

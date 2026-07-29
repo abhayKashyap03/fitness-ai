@@ -20,7 +20,7 @@ from ..store.canonical import (
 )
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
 from .healthkit import parse_body_record
-from .myfitnesspal import parse_diary, parse_measurement
+from .myfitnesspal import parse_diary, parse_exercise, parse_measurement
 from .whoop import parse_recovery, parse_sleep, parse_workout
 
 
@@ -119,6 +119,7 @@ def normalize_all(
     n_wt, n_wt_skipped = _normalize_healthkit_weight(conn, user_id, derived_at)
     n_food = _normalize_mfp_food(conn, user_id, derived_at)
     n_mfp_wt = _normalize_mfp_weight(conn, user_id, derived_at)
+    n_mfp_wk = _normalize_mfp_workout(conn, user_id, derived_at)
 
     n_groups = _regroup_workouts(conn, tolerance_s)
     conn.commit()
@@ -129,6 +130,7 @@ def normalize_all(
         "weight": n_wt,
         "weight_skipped": n_wt_skipped,
         "mfp_weight": n_mfp_wt,
+        "mfp_workout": n_mfp_wk,
         "food": n_food,
         "workout_groups": n_groups,
     }
@@ -234,6 +236,37 @@ def _normalize_mfp_weight(conn: sqlite3.Connection, user_id: int, derived_at: st
     return n
 
 
+def _normalize_mfp_workout(conn: sqlite3.Connection, user_id: int, derived_at: str) -> int:
+    """Derive workout rows from `exercise_entry` items in raw MFP diaries.
+
+    MFP is a real training source, not just food: a walk logged there must reach
+    `workout` or it is invisible to status, the dashboard and the coach.
+
+    Same newest-version-wins rule as food (a re-logged day supersedes its
+    earlier snapshot), and the MFP slice is cleared first so an exercise deleted
+    in the app doesn't linger. Only source='myfitnesspal' rows are touched —
+    WHOOP siblings are left alone (§2.3); `_regroup_workouts` then groups a
+    session seen by both sources so compute counts it once (T2.6).
+    """
+    conn.execute("DELETE FROM workout WHERE source='myfitnesspal'")
+
+    newest: dict[str, sqlite3.Row] = {}
+    for r in conn.execute(
+        "SELECT id, external_id, payload FROM raw_events "
+        "WHERE source='myfitnesspal' AND record_type='diary' "
+        "ORDER BY ingested_at, rowid"
+    ).fetchall():
+        newest[str(r["external_id"])] = r
+
+    n = 0
+    for r in newest.values():
+        record = json.loads(r["payload"])
+        for row in parse_exercise(record, user_id=user_id):
+            upsert_workout(conn, row, raw_ref=r["id"], derived_at=derived_at)
+            n += 1
+    return n
+
+
 def _regroup_workouts(conn: sqlite3.Connection, tolerance_s: int) -> int:
     slots = [
         WkSlot(
@@ -246,9 +279,65 @@ def _regroup_workouts(conn: sqlite3.Connection, tolerance_s: int) -> int:
         for r in conn.execute("SELECT id, user_id, sport_type, start_at, end_at FROM workout")
     ]
     mapping = assign_session_groups(slots, tolerance_s)
+    mapping = _absorb_placeholder_time_sources(conn, mapping)
     for wid, gid in mapping.items():
         conn.execute(
             "UPDATE workout SET session_group_id=?, dedupe_hash=? WHERE id=?",
             (gid, gid, wid),
         )
     return len(set(mapping.values()))
+
+
+# Sources whose exercise timestamps are entered by hand (or defaulted by the
+# app) rather than measured. MyFitnessPal repeats the same clock time across
+# months — e.g. every logged walk at 08:30 — so a start-time tolerance window
+# can NEVER match one against the strap's measured instant.
+_PLACEHOLDER_TIME_SOURCES = ("myfitnesspal",)
+
+
+def _absorb_placeholder_time_sources(
+    conn: sqlite3.Connection, mapping: dict[str, str]
+) -> dict[str, str]:
+    """Fold hand-logged sessions into a measured session of the same day+sport.
+
+    Time-window dedup (T2.6) assumes both sides carry a real instant. They
+    don't: the same session logged in MFP and detected by WHOOP lands hours
+    apart, so both survive as separate groups and compute counts the workout —
+    and its calories — TWICE. That is the exact cross-source double-count
+    CLAUDE.md §5 calls an expected bug class.
+
+    So for each (user, day, sport) where a strap-detected session exists, the
+    hand-logged rows join that group — grouping only, which source's numbers get
+    reported is decided at READ time by the resolver's ranking (§2.3), where
+    MyFitnessPal outranks WHOOP for training.
+
+    Deliberate trade-off: two genuinely distinct same-sport sessions on one day —
+    one strap-detected, one hand-logged — collapse into one. Under-counting one
+    session is the safer error; double-counting inflates burn and would flatter
+    the cut.
+    """
+    rows = list(
+        conn.execute(
+            "SELECT id, user_id, day_key, sport_type, source FROM workout"
+        )
+    )
+    measured_group: dict[tuple[int, str, str], str] = {}
+    for r in rows:
+        if r["source"] in _PLACEHOLDER_TIME_SOURCES:
+            continue
+        key = (r["user_id"], r["day_key"], r["sport_type"])
+        gid = mapping.get(r["id"])
+        if gid is not None:
+            measured_group.setdefault(key, gid)
+
+    if not measured_group:
+        return mapping
+
+    merged = dict(mapping)
+    for r in rows:
+        if r["source"] not in _PLACEHOLDER_TIME_SOURCES:
+            continue
+        gid = measured_group.get((r["user_id"], r["day_key"], r["sport_type"]))
+        if gid is not None:
+            merged[r["id"]] = gid
+    return merged

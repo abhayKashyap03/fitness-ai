@@ -377,6 +377,12 @@ subscription** — a Pro/Max plan grants no API access.
   under `source='healthkit'` (OKOK scale vs MFP weight). Keep them sibling rows,
   distinguished by a non-destructive `source_app` column; resolve at read time.
   → [ADR-0008](docs/adr/0008-healthkit-source-app.md).
+- **D5 — Source-domain ownership.** Each domain has ONE authoritative source,
+  resolved at read time: **training/exercise + food → MyFitnessPal**;
+  **recovery/HRV/sleep/skin-temp → WHOOP**; weight → scale via Apple Health.
+  WHOOP is a recovery instrument here, not a fitness tracker. `strain` is the
+  documented exception — WHOOP-only, so it is aggregated separately and never
+  lost to the ranking. → [ADR-0015](docs/adr/0015-source-domain-ownership.md).
 - **D4 — MyFitnessPal direct API (overrides §12 for the user's own account).**
   §12's "do not scrape MFP" is **overridden with sign-off** for this n=1 tool:
   we ingest the user's own diary directly from MFP's private v2 JSON API (read
@@ -446,9 +452,9 @@ compute layer with tests.
 
 | Source | Status |
 |---|---|
-| WHOOP Cloud API | ✅ Free OAuth 2.0 (v2). ~100 req/min. Requires active membership. Recovery *formula* is proprietary — we get the score + inputs, not the weighting. Supplies UTC offset, not IANA zone. |
+| WHOOP Cloud API | ✅ Free OAuth 2.0 (v2). ~100 req/min. Requires active membership. **Recovery instrument only** — HRV/sleep/skin-temp/strain. Its auto-detected workouts are NOT the training log (ADR-0015). Recovery *formula* is proprietary — we get the score + inputs, not the weighting. Supplies UTC offset, not IANA zone. |
 | WHOOP local BLE | ⚠️ Unofficial. 5.0 protocol demonstrated (whoop-vault, NOOP — `fd4b` family); MG variant pending hardware spike (ADR-0012) |
-| MyFitnessPal | API officially closed. **OVERRIDE (ADR-0010, signed off):** for THIS n=1 tool we ingest the user's OWN diary directly from MFP's private **v2 JSON API** — read only, authenticated with the user's pasted session cookie, **never** automating login. Fragile (private endpoints churn) but daily. The **Privacy Center → "Download My Data"** CSV export remains a valid, sanctioned occasional backfill. Do NOT generalize this override beyond the user's own account, and do NOT ship a scraper as a product feature. |
+| MyFitnessPal | **Authoritative for food AND training/exercise** (ADR-0015). API officially closed. **OVERRIDE (ADR-0010, signed off):** for THIS n=1 tool we ingest the user's OWN diary directly from MFP's private **v2 JSON API** — read only, authenticated with the user's pasted session cookie, **never** automating login. Fragile (private endpoints churn) but daily. The **Privacy Center → "Download My Data"** CSV export remains a valid, sanctioned occasional backfill. Do NOT generalize this override beyond the user's own account, and do NOT ship a scraper as a product feature. |
 | Apple HealthKit / Google Health Connect | ✅ But **not readable from a laptop** — data lives on-device. Bridge via Health export (XML zip). **Weight/body-comp source only** — MFP paywalled its Apple Health *nutrition* sync (~2024–25), so food does NOT reliably reach the export (n=1: 5 dietary days total, dead after 2026-02). |
 | USDA FoodData Central / Open Food Facts | ✅ Free, open — the intended nutrition DB path |
 | Smart scale | ⚠️ Brand-dependent; Withings has an API, most others route through the health platforms |

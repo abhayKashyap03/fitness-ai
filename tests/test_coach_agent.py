@@ -112,8 +112,7 @@ class GoogleScript:
                 "candidates": [
                     {"content": {"role": "model", "parts": parts}, "finishReason": finish}
                 ],
-                "usageMetadata": usage
-                or {"promptTokenCount": 10, "candidatesTokenCount": 5},
+                "usageMetadata": usage or {"promptTokenCount": 10, "candidatesTokenCount": 5},
             },
         )
 
@@ -252,9 +251,7 @@ def test_google_honors_json_retry_delay_from_429_body():
             "code": 429,
             "message": "You exceeded your current quota. Please retry in 54.1s.",
             "status": "RESOURCE_EXHAUSTED",
-            "details": [
-                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "54s"}
-            ],
+            "details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "54s"}],
         }
     }
     tr = FakeTransport([(429, body_429), GoogleScript.text("ok")])
@@ -513,9 +510,7 @@ def test_ask_tool_round_executes_and_feeds_back(seeded_conn, script):
 def test_ask_today_reaches_system_prompt_and_fills_omitted_dates(seeded_conn, script):
     # the model has no clock (a live Gemini run guessed 2023): the caller's
     # `today` must land in the system prompt AND fill an omitted end/date
-    tr = FakeTransport(
-        [script.tool("get_weight_trend", {"window": 7}), script.text("ok")]
-    )
+    tr = FakeTransport([script.tool("get_weight_trend", {"window": 7}), script.text("ok")])
     res = ask(seeded_conn, script.build(tr), "how's my weight?", today=WEIGH_DAY)
     assert res.text == "ok"
     assert WEIGH_DAY in json.dumps(tr.requests[0])  # date visible to the model
@@ -557,9 +552,7 @@ def test_ask_max_tokens_notes_truncation(seeded_conn, script):
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)
 def test_usage_accumulates_across_rounds(seeded_conn, script):
-    tr = FakeTransport(
-        [script.tool("get_daily_status", {"date": WEIGH_DAY}), script.text("done")]
-    )
+    tr = FakeTransport([script.tool("get_daily_status", {"date": WEIGH_DAY}), script.text("done")])
     res = ask(seeded_conn, script.build(tr), "?")
     assert res.usage.input_tokens == 20 and res.usage.output_tokens == 10
 
@@ -618,17 +611,40 @@ def test_fabricated_numbers_ignores_dates_and_years():
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)
-def test_run_grounding_offline_faithful_passes(script):
-    tr = FakeTransport([script.text("I don't have that logged for this day.")] * 3)
-    results = run_live_grounding(script.build(tr))
-    assert all(r["passed"] for r in results)
+def test_run_grounding_offline_absence_answer_passes_absence_scenarios(script):
+    from coach.coach.grounding import SCENARIOS
+
+    tr = FakeTransport([script.text("I don't have that logged for this day.")] * len(SCENARIOS))
+    by = {r["scenario"]: r for r in run_live_grounding(script.build(tr))}
+    # Refusing when the data really is absent is the correct answer.
+    assert by["recovery_absent"]["passed"]
+    assert by["no_plan_set"]["passed"]
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)
+def test_run_grounding_offline_stonewalling_fails_when_data_exists(script):
+    """The eval must be two-sided: refusing to report REAL data is a failure too.
+
+    Without this, a model that answers "I don't have that" to everything scores a
+    perfect zero-fabrication run while being useless.
+    """
+    from coach.coach.grounding import SCENARIOS
+
+    tr = FakeTransport([script.text("I don't have that logged for this day.")] * len(SCENARIOS))
+    by = {r["scenario"]: r for r in run_live_grounding(script.build(tr))}
+    stonewalled = by["recovery_present_must_be_reported"]
+    assert not stonewalled["passed"]
+    assert stonewalled["omitted_numbers"]  # 71 (score) and 62 (HRV) were served
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=SCRIPT_IDS)
 def test_run_grounding_offline_fabrication_fails(script):
-    tr = FakeTransport([script.text("Your recovery was 62.")] * 3)
+    from coach.coach.grounding import SCENARIOS
+
+    tr = FakeTransport([script.text("Your recovery was 1234.5.")] * len(SCENARIOS))
     results = run_live_grounding(script.build(tr))
     assert not any(r["passed"] for r in results)
+    assert all(r["fabricated_numbers"] for r in results)
 
 
 # ---- CLI surface -----------------------------------------------------------

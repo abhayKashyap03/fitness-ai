@@ -17,13 +17,15 @@ principles, and [`docs/adr/`](docs/adr/) for the decisions behind them.
 
 | Source | Role | Status |
 |---|---|---|
-| WHOOP Cloud API (OAuth) | recovery, sleep, strain, workouts | ✅ live daily |
-| MyFitnessPal v2 API (session cookie) | food diary + weight | ✅ daily driver ([ADR-0009](docs/adr/0009-myfitnesspal-direct-api.md)/[0010](docs/adr/0010-override-mfp-scraping-ban.md)) |
+| WHOOP Cloud API (OAuth) | recovery, HRV, sleep, skin temp, strain | ✅ live daily |
+| MyFitnessPal v2 API (session cookie) | food diary + **training/exercise** + weight | ✅ daily driver ([ADR-0009](docs/adr/0009-myfitnesspal-direct-api.md)/[0010](docs/adr/0010-override-mfp-scraping-ban.md)) |
 | Apple Health export (.xml/.zip) | body-comp backfill (OKOK scale etc.) | ✅ occasional, manual |
 | WHOOP local BLE (Adapter B) | subscription-free recovery after membership ends | 🔬 recon done ([ADR-0012](docs/adr/0012-ble-adapter-approach.md)); hardware spike pending |
 
 Multiple sources for the same fact coexist as sibling rows; precedence is
-resolved at **read** time, never by overwriting data.
+resolved at **read** time, never by overwriting data. Each domain has one
+authoritative source ([ADR-0015](docs/adr/0015-source-domain-ownership.md)):
+MyFitnessPal owns food and training, WHOOP owns recovery/sleep.
 
 ## Requirements
 

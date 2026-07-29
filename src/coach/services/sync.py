@@ -23,7 +23,7 @@ from ..adapters.myfitnesspal.ingest import auto_since as mfp_auto_since
 from ..adapters.myfitnesspal.ingest import ingest_mfp
 from ..adapters.whoop.auth import ReauthRequired
 from ..adapters.whoop.client import WhoopClient
-from ..adapters.whoop.ingest import auto_since as whoop_auto_since
+from ..adapters.whoop.ingest import auto_since_by_type as whoop_auto_since_by_type
 from ..adapters.whoop.ingest import ingest_whoop
 from ..config import ConfigError, Settings
 from ..normalize.runner import normalize_all
@@ -65,7 +65,10 @@ def run_sync(
     # --- WHOOP ---
     try:
         settings.require_whoop()
-        since = whoop_auto_since(conn)
+        # Per-type windows: a quiet type (no workouts this week) must not drag
+        # every other type's window back (see auto_since_by_type).
+        by_type = whoop_auto_since_by_type(conn)
+        since = min(by_type.values()) if by_type else None
         if since is None:
             sources.append(
                 SourceResult(
@@ -75,7 +78,7 @@ def run_sync(
             )
         else:
             whoop_counts = ingest_whoop(
-                conn, whoop_client(settings), since=since, user_id=settings.user_id
+                conn, whoop_client(settings), since=by_type, user_id=settings.user_id
             )
             sources.append(SourceResult("whoop", counts=dict(whoop_counts), since=since))
     except ConfigError:

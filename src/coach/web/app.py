@@ -116,6 +116,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with _conn() as conn:
             return tools.get_plan_status(conn, end=_day(end), window=window, user_id=cfg.user_id)
 
+    @app.get("/api/training")
+    def api_training(date: str | None = None) -> dict:
+        with _conn() as conn:
+            return tools.get_training_sessions(conn, date=_day(date), user_id=cfg.user_id)
+
     @app.get("/api/safety")
     def api_safety(end: str | None = None, window: int = Query(30, ge=1)) -> dict:
         with _conn() as conn:
@@ -160,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             tdee = tools.get_tdee_estimate(conn, end=day, user_id=cfg.user_id)
             weight = tools.get_weight_trend(conn, end=day, window=30, user_id=cfg.user_id)
             safety = tools.get_safety_flags(conn, end=day, user_id=cfg.user_id)
+            sessions = tools.get_training_sessions(conn, date=day, user_id=cfg.user_id)
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -172,6 +178,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "tdee": tdee,
                 "weight": weight,
                 "safety": safety,
+                "sessions": sessions,
             },
         )
 
@@ -492,6 +499,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "lag1_autocorr": corr(rep.hrv_lag1_autocorr),
             "dev_vs_next_score": corr(rep.dev_vs_next_score),
             "dev_vs_next_strain": corr(rep.dev_vs_next_strain),
+            "dev_vs_next_train_min": corr(rep.dev_vs_next_train_min),
             "verdict": rep.verdict,
             "rationale": rep.rationale,
         }

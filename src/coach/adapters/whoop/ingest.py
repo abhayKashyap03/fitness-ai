@@ -8,7 +8,7 @@ future slices. Idempotent — re-running a window inserts no duplicates.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from ...store.raw import insert_raw_event
 from .client import WhoopClient
@@ -69,11 +69,42 @@ def auto_since(conn: sqlite3.Connection, *, overlap_days: int = 2) -> str | None
     return since.replace("+00:00", "Z")
 
 
+def auto_since_by_type(conn: sqlite3.Connection, *, overlap_days: int = 2) -> dict[str, str]:
+    """Per-record-type incremental watermarks.
+
+    :func:`auto_since` takes the MIN across types so an interrupted ingest can't
+    strand a type past the watermark. That is safe but pessimistic: a type with
+    no NEW data (no workouts logged for a week) is indistinguishable from a type
+    that was never fetched, so its stale watermark drags EVERY type's window
+    back — re-fetching days that are already stored, forever.
+
+    Resuming each type from its OWN newest record keeps the interrupted-ingest
+    guarantee (a type that missed a run still resumes from where it really got
+    to) without letting a quiet type hold the others back.
+    """
+    from datetime import timedelta
+
+    from ...timeutil import parse_instant, to_utc_iso
+
+    out: dict[str, str] = {}
+    for row in conn.execute(
+        "SELECT record_type, MAX(recorded_at) AS m FROM raw_events "
+        "WHERE source='whoop_api' AND recorded_at IS NOT NULL "
+        "GROUP BY record_type"
+    ):
+        watermark = row["m"]
+        if not watermark:
+            continue
+        since = to_utc_iso(parse_instant(watermark) - timedelta(days=overlap_days))
+        out[str(row["record_type"])] = since.replace("+00:00", "Z")
+    return out
+
+
 def ingest_whoop(
     conn: sqlite3.Connection,
     client: WhoopClient,
     *,
-    since: str,
+    since: str | Mapping[str, str],
     until: str | None = None,
     user_id: int = 1,
 ) -> dict[str, dict[str, int]]:
@@ -83,13 +114,30 @@ def ingest_whoop(
     """
     result: dict[str, dict[str, int]] = {}
 
+    def _since_for(record_type: str) -> str:
+        """This type's window. A mapping resumes each type from its own
+        watermark; a bare string applies one window to all (explicit backfill).
+        Falls back to the earliest known window so a type absent from the
+        mapping is re-fetched rather than silently skipped."""
+        if isinstance(since, str):
+            return since
+        return since.get(record_type) or min(since.values())
+
     plan = [
-        ("recovery", client.get_recovery(since, until), "sleep_id", "created_at"),
-        ("cycle", client.get_cycles(since, until), "id", "start"),
-        ("sleep", client.get_sleep(since, until), "id", "end"),
-        ("workout", client.get_workouts(since, until), "id", "start"),
+        ("recovery", "sleep_id", "created_at"),
+        ("cycle", "id", "start"),
+        ("sleep", "id", "end"),
+        ("workout", "id", "start"),
     ]
-    for record_type, records, id_key, time_key in plan:
+    fetch = {
+        "recovery": client.get_recovery,
+        "cycle": client.get_cycles,
+        "sleep": client.get_sleep,
+        "workout": client.get_workouts,
+    }
+    for record_type, id_key, time_key in plan:
+        type_since = _since_for(record_type)
+        records = fetch[record_type](type_since, until)
         ins, skip = _ingest_records(
             conn,
             records,

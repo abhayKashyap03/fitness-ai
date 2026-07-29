@@ -44,8 +44,8 @@ MIN_AUTOCORR = 0.30
 MIN_DEV_CORR = 0.20
 
 # Verdict labels.
-SIGNAL = "signal"          # HRV clears both bars — worth informing coaching
-NOISE = "noise"            # enough data, bars not cleared — indistinguishable
+SIGNAL = "signal"  # HRV clears both bars — worth informing coaching
+NOISE = "noise"  # enough data, bars not cleared — indistinguishable
 INSUFFICIENT = "insufficient"  # not enough paired days to judge either way
 
 
@@ -146,11 +146,7 @@ def deviation_series(series: dict[str, float], *, window: int = 7) -> dict[str, 
 
 
 def _daily(conn: sqlite3.Connection, sql: str, args: tuple) -> dict[str, float]:
-    return {
-        r["day_key"]: float(r["v"])
-        for r in conn.execute(sql, args)
-        if r["v"] is not None
-    }
+    return {r["day_key"]: float(r["v"]) for r in conn.execute(sql, args) if r["v"] is not None}
 
 
 def hrv_verdict(
@@ -173,8 +169,7 @@ def hrv_verdict(
     """
     if isinstance(autocorr, Insufficient):
         return INSUFFICIENT, (
-            f"only {autocorr.have} consecutive-day HRV pairs; need "
-            f"{autocorr.needed} to judge."
+            f"only {autocorr.have} consecutive-day HRV pairs; need {autocorr.needed} to judge."
         )
     measured = [c for c in dev_correlations if isinstance(c, Correlation)]
     strongest = max((abs(c.r) for c in measured), default=0.0)
@@ -191,9 +186,7 @@ def hrv_verdict(
         reasons.append(f"autocorrelation {autocorr.r:+.2f} < {MIN_AUTOCORR}")
     if strongest < MIN_DEV_CORR:
         reasons.append(f"best next-day correlation {strongest:.2f} < {MIN_DEV_CORR}")
-    return NOISE, (
-        "indistinguishable from noise on your data (" + "; ".join(reasons) + ")."
-    )
+    return NOISE, ("indistinguishable from noise on your data (" + "; ".join(reasons) + ").")
 
 
 @dataclass(frozen=True)
@@ -204,6 +197,11 @@ class HrvValidationReport:
     hrv_lag1_autocorr: Correlation | Insufficient
     dev_vs_next_score: Correlation | Insufficient
     dev_vs_next_strain: Correlation | Insufficient
+    # Training MINUTES, not strain: strain is WHOOP-only, so that probe is capped
+    # by strap coverage. Duration is reported by every training source, giving the
+    # same hypothesis ("does today's HRV predict how hard I train tomorrow?")
+    # materially more statistical power.
+    dev_vs_next_train_min: Correlation | Insufficient
     verdict: str = NOISE
     rationale: str = ""
 
@@ -240,12 +238,25 @@ def hrv_validation_report(
         "GROUP BY day_key ORDER BY day_key",
         (user_id, start, end),
     )
+    # Daily training minutes, counted ONCE per real session: a workout logged in
+    # MyFitnessPal and detected by the strap shares a session_group_id, and
+    # summing both rows would inflate the load it is supposed to measure (§5).
+    train_min = _daily(
+        conn,
+        "SELECT day_key, SUM(mins) AS v FROM ("
+        "  SELECT day_key, MAX(duration_s) / 60.0 AS mins FROM workout"
+        "  WHERE user_id=? AND day_key BETWEEN ? AND ? AND duration_s IS NOT NULL"
+        "  GROUP BY day_key, COALESCE(session_group_id, id)"
+        ") GROUP BY day_key ORDER BY day_key",
+        (user_id, start, end),
+    )
 
     dev = deviation_series(hrv)
     autocorr = lag1_autocorrelation(hrv)
     dev_score = pearson(*lagged_pairs(dev, score, lag_days=1))
     dev_strain = pearson(*lagged_pairs(dev, strain, lag_days=1))
-    verdict, rationale = hrv_verdict(autocorr, [dev_score, dev_strain])
+    dev_train = pearson(*lagged_pairs(dev, train_min, lag_days=1))
+    verdict, rationale = hrv_verdict(autocorr, [dev_score, dev_strain, dev_train])
     return HrvValidationReport(
         window_days=window,
         hrv_days=len(hrv),
@@ -253,6 +264,7 @@ def hrv_validation_report(
         hrv_lag1_autocorr=autocorr,
         dev_vs_next_score=dev_score,
         dev_vs_next_strain=dev_strain,
+        dev_vs_next_train_min=dev_train,
         verdict=verdict,
         rationale=rationale,
     )

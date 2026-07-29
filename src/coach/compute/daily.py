@@ -14,8 +14,19 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 
-# representative pick when a session_group has rows from multiple sources
-_SOURCE_RANK = "CASE source WHEN 'whoop_api' THEN 1 WHEN 'whoop_ble' THEN 2 ELSE 9 END"
+# Representative pick when a session_group has rows from multiple sources.
+#
+# TRAINING BELONGS TO MYFITNESSPAL. The user logs sessions there deliberately;
+# WHOOP's auto-detected workouts are a by-product of a strap worn for RECOVERY
+# metrics (HRV, skin temp, sleep), and its exercise/calorie figures are not the
+# record of what was trained. So MFP wins a shared session's own numbers.
+#
+# `strain` is the exception: it is WHOOP-proprietary with no MFP equivalent, so
+# it is aggregated separately (see _training) and this ranking never loses it.
+_SOURCE_RANK = (
+    "CASE source WHEN 'myfitnesspal' THEN 1 WHEN 'whoop_api' THEN 2 "
+    "WHEN 'whoop_ble' THEN 3 ELSE 9 END"
+)
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,19 @@ class TrainingSummary:
 
 
 @dataclass(frozen=True)
+class SessionSummary:
+    """One real training session (already deduped across sources)."""
+
+    sport_type: str
+    source: str
+    description: str | None  # what the source called it, when it says
+    start_at: str
+    duration_s: int | None
+    kcal_active: float | None
+    strain: float | None  # WHOOP-only; None when no strap row joined the group
+
+
+@dataclass(frozen=True)
 class DailyStatus:
     day_key: str
     user_id: int
@@ -95,8 +119,12 @@ def _sleep(conn: sqlite3.Connection, day: str, uid: int) -> SleepSummary | None:
     if r is None:
         return None
     return SleepSummary(
-        r["source"], r["in_bed_min"], r["sws_min"], r["rem_min"],
-        r["efficiency_pct"], r["performance_pct"],
+        r["source"],
+        r["in_bed_min"],
+        r["sws_min"],
+        r["rem_min"],
+        r["efficiency_pct"],
+        r["performance_pct"],
     )
 
 
@@ -163,12 +191,75 @@ def _training(conn: sqlite3.Connection, day: str, uid: int) -> TrainingSummary:
     if kcal is None:
         kcal = _sum("kcal_total")
     dur = _sum("duration_s")
+
+    # Strain comes from whichever row in each group actually has it (WHOOP), not
+    # from the representative — otherwise preferring MFP for training would
+    # silently drop a health metric MFP never reports. One value per group, so a
+    # session seen by both sources still contributes its strain once.
+    strain_row = conn.execute(
+        """
+        SELECT SUM(s) AS total FROM (
+          SELECT MAX(strain) AS s FROM workout
+          WHERE user_id=? AND day_key=? AND strain IS NOT NULL
+          GROUP BY COALESCE(session_group_id, id)
+        )
+        """,
+        (uid, day),
+    ).fetchone()
+
     return TrainingSummary(
         sessions=len(rows),
         kcal_active=kcal,
         duration_s=int(dur) if dur is not None else None,
-        strain=_sum("strain"),
+        strain=strain_row["total"] if strain_row else None,
     )
+
+
+def training_sessions(
+    conn: sqlite3.Connection, day_key: str, user_id: int = 1
+) -> list[SessionSummary]:
+    """The day's sessions, one row per real session (§5 dedup already applied).
+
+    The aggregate in :class:`TrainingSummary` answers "how much"; this answers
+    "what". Same representative rule as the rollup — MyFitnessPal wins a shared
+    session (ADR-0015) — and `strain` is carried from whichever row in the group
+    actually has it, so a strap-measured value survives an MFP representative.
+    """
+    rows = conn.execute(
+        f"""
+        WITH ranked AS (
+          SELECT *,
+                 COALESCE(session_group_id, id) AS grp,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY COALESCE(session_group_id, id)
+                   ORDER BY {_SOURCE_RANK}, id
+                 ) AS rnk
+          FROM workout WHERE user_id=? AND day_key=?
+        ),
+        grp_strain AS (
+          SELECT COALESCE(session_group_id, id) AS grp, MAX(strain) AS s
+          FROM workout WHERE user_id=? AND day_key=? GROUP BY COALESCE(session_group_id, id)
+        )
+        SELECT r.sport_type, r.source, r.source_sport_raw, r.start_at,
+               r.duration_s, r.kcal_active, g.s AS strain
+        FROM ranked r JOIN grp_strain g ON g.grp = r.grp
+        WHERE r.rnk = 1
+        ORDER BY r.start_at
+        """,
+        (user_id, day_key, user_id, day_key),
+    ).fetchall()
+    return [
+        SessionSummary(
+            sport_type=r["sport_type"],
+            source=r["source"],
+            description=r["source_sport_raw"],
+            start_at=r["start_at"],
+            duration_s=r["duration_s"],
+            kcal_active=r["kcal_active"],
+            strain=r["strain"],
+        )
+        for r in rows
+    ]
 
 
 def daily_status(conn: sqlite3.Connection, day_key: str, user_id: int = 1) -> DailyStatus:
