@@ -27,6 +27,7 @@ from ..compute.guardrails import Alert, TrendPoint, weight_loss_rate_alert
 from ..compute.plan import plan_status
 from ..compute.tdee import build_window, estimate_tdee
 from ..compute.trends import Insufficient
+from ..store.notes import recent_notes
 from ..store.plan import active_plan
 from .llm import ToolSpec as LLMToolSpec
 
@@ -234,6 +235,30 @@ def get_training_sessions(conn: sqlite3.Connection, *, date: str, user_id: int =
     return {"date": date, "sessions": sessions, "count": len(sessions)}
 
 
+def get_coach_notes(conn: sqlite3.Connection, *, limit: int = 20, user_id: int = 1) -> dict:
+    """Past coaching decisions and observations, newest first (ADR-0016).
+
+    This is MEMORY, not measurement: it records that a decision was made and why,
+    so guidance stays consistent between sessions. It never carries a current
+    number — anything measurable must be re-read from the other tools, because a
+    note is a historical statement and may be out of date.
+
+    An empty list means nothing has been recorded yet; say so rather than
+    inferring history (§2.7).
+    """
+    notes = [
+        {
+            "created_at": n.created_at,
+            "day_key": n.day_key,
+            "author": n.author,
+            "kind": n.kind,
+            "text": n.text,
+        }
+        for n in recent_notes(conn, limit=limit, user_id=user_id)
+    ]
+    return {"notes": notes, "count": len(notes)}
+
+
 def get_plan_status(
     conn: sqlite3.Connection, *, end: str, window: int = 14, user_id: int = 1
 ) -> dict:
@@ -380,6 +405,23 @@ TOOLS: list[ToolSpec] = [
         handler=get_training_sessions,
     ),
     ToolSpec(
+        name="get_coach_notes",
+        description=(
+            "Past coaching decisions and observations (newest first) so guidance "
+            "stays consistent with what was already advised. These are HISTORICAL "
+            "statements, not current measurements — re-read any number from the "
+            "other tools rather than quoting it from a note. An empty list means "
+            "nothing has been recorded yet."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "how many notes", "minimum": 1}
+            },
+        },
+        handler=get_coach_notes,
+    ),
+    ToolSpec(
         name="get_plan_status",
         description=(
             "The user's active cut/bulk plan vs measured state: today's calorie "
@@ -400,10 +442,17 @@ _BY_NAME = {t.name: t for t in TOOLS}
 
 # per-tool name of its day anchor (filled with the server-side "today" when the
 # model omits it — the model must never have to guess the current date, §2.2)
-_DAY_ARG = {
-    t.name: ("date" if t.name in {"get_daily_status", "get_training_sessions"} else "end")
-    for t in TOOLS
-}
+# Per-tool day anchor, filled server-side when the model omits it (the model has
+# no clock, §2.2). get_coach_notes has no day argument at all — None means
+# "inject nothing", so a date never gets smuggled into a tool that has no window.
+_DAY_ARG: dict[str, str | None] = {}
+for _t in TOOLS:
+    if _t.name in {"get_daily_status", "get_training_sessions"}:
+        _DAY_ARG[_t.name] = "date"
+    elif _t.name == "get_coach_notes":
+        _DAY_ARG[_t.name] = None
+    else:
+        _DAY_ARG[_t.name] = "end"
 
 
 def tool_specs() -> list[LLMToolSpec]:
@@ -436,6 +485,6 @@ def dispatch(
     if spec is None:
         raise KeyError(f"unknown tool: {name!r}")
     day_arg = _DAY_ARG[name]
-    if today is not None and not args.get(day_arg):
+    if day_arg is not None and today is not None and not args.get(day_arg):
         args = {**args, day_arg: today}
     return spec.handler(conn, user_id=user_id, **args)

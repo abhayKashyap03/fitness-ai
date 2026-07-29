@@ -7,7 +7,7 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **419 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
+- **429 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
   PRs #12–#19 merged; #20 (web UI) and #21 (MFP training + watermark) open.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
@@ -62,6 +62,33 @@ computes it (§2.2), clamped by the guardrails (§8.6).
   calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
   (ADR-0005) — by design, fills in with a few more days.
 - +26 plan tests. **328 tests green; ruff + mypy clean.**
+
+---
+
+## Session 2026-07-28 (c) — coaching memory (ADR-0016)
+
+The P10 "coaching memory & consistency" item. The coach had data but no record of
+its own DECISIONS, so guidance drifted between sessions.
+
+- **Migration 0012 `coach_note`** — append-only, like `plan`. User/code-authored
+  primary data (no raw_ref, absent from the rebuild/fingerprint).
+- **The load-bearing decision (ADR-0016): the model READS memory and never
+  writes it.** Authors are `user` or `system` only, enforced in both the helper
+  and a schema CHECK. A model-authored memory would let a fabricated number
+  become persistent truth that nothing recomputes — the zero-fabrication
+  guarantee would then rest on the model never having erred once.
+- Notes record *that a decision was made and why*, never a measurement, so a
+  stale note can't be served as a current number. `coach plan set` now writes a
+  `system` note automatically.
+- `get_coach_notes` (9th tool) + `coach note add|list`. `dispatch`'s today-filler
+  now skips tools with no day anchor.
+- **D6 logged in DECISIONS_NEEDED** — whether the model may author notes is a
+  one-way door; the conservative half shipped, the question is the human's.
+- 10 new tests. **429 green**; ruff + mypy clean.
+
+⚠️ **Note:** the live plan was briefly set to -0.85%/wk while verifying the
+auto-note, then restored to -1.00%/wk. The `plan` table is append-only, so both
+rows remain in history; the ACTIVE plan matches what it was before.
 
 ---
 

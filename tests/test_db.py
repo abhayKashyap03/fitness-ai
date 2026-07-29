@@ -34,8 +34,8 @@ def test_migrate_applies_all_then_idempotent(db_path: Path):
     try:
         assert db.current_version(conn) == 0
         applied = db.migrate(conn)
-        assert [m.version for m in applied] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-        assert db.current_version(conn) == 11
+        assert [m.version for m in applied] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        assert db.current_version(conn) == 12
         # second run is a no-op
         assert db.migrate(conn) == []
         assert db.pending_migrations(conn) == []

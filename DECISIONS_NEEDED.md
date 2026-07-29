@@ -7,7 +7,36 @@
 > When a decision is made it **graduates to an ADR** in `docs/adr/` and is
 > **removed** from this queue (CLAUDE.md §6.3).
 
-_(empty — nothing blocked)_
+## D6 — May the coach author its own memory? 🔒 (not blocking; conservative half shipped)
+
+**Shipped conservatively (ADR-0016):** `coach_note` accepts `user` and `system`
+authors only. Code writes a note when a plan is set; the human writes the rest.
+The model **reads** memory and never writes it.
+
+**The open question:** should the model be allowed to append its own notes
+("advised a deload because recovery was low 4 days running")?
+
+- **(A) Keep it closed (current).** No new fabrication surface. Cost: the coach
+  can't record its own reasoning, so continuity only covers decisions that pass
+  through code or you.
+- **(B) Allow model-authored notes, marked `model`.** Richer continuity. Risk: a
+  wrong number written today is read back as established fact next week and
+  nothing recomputes it — the zero-fabrication guarantee (§1.2/§2.2) would then
+  rest on the model never having erred once.
+- **(C) Model proposes, human confirms.** Notes land in a pending state and only
+  become readable once approved. Safe, but adds a review queue to a tool whose
+  whole point is low friction (risk #8).
+
+**Recommendation: stay on (A) until the grounding eval routinely passes at
+scale.** Reversing toward (B) later is additive — a new author value plus a
+filter. Reversing *out* of (B) would mean auditing every note ever written.
+
+**Why it matters:** memory is the one place a model error becomes permanent
+rather than per-answer.
+
+---
+
+_(nothing else blocked)_
 
 Recently resolved:
 - **D5 — Cut/bulk target model** → [ADR-0013](docs/adr/0013-plan-target-model.md). Option C (user, 2026-07-26): accept goal-weight+deadline OR %/week, store the (§8.6-clamped) rate as the one canonical driver; deadline is convenience only. Implemented in migration 0010 + `compute/plan.py`.

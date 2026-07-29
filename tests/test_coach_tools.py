@@ -45,6 +45,7 @@ def test_tool_specs_shape():
         "get_safety_flags",
         "get_plan_status",
         "get_training_sessions",
+        "get_coach_notes",
     }
     for d in specs:
         assert not hasattr(d, "handler")  # no handler leaked to the provider
