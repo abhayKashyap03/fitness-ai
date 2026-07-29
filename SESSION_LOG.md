@@ -65,28 +65,35 @@ computes it (§2.2), clamped by the guardrails (§8.6).
 
 ---
 
-## Session 2026-07-29 — one plan-set seam (found by using the dashboard)
+## Session 2026-07-29 — one plan-set seam (CLI and web had drifted)
 
-Opened the web dashboard to look at the now-live plan card and it showed a plan
-(-0.50%/week) that had NOT been set from the CLI. Investigated rather than
-assumed:
+Opened the web dashboard and it showed a plan (-0.50%/week) that did not match
+what the CLI had last set. **The user had changed it themselves from the
+dashboard** — the ordinary use of a form that exists to be used.
 
-- Ruled out pytest empirically (row count unchanged across a full run) — the
-  first hypothesis, and it was wrong.
-- The coaching-note trail settled it: every CLI `plan set` had written a
-  `system` note; the -0.50 rows had none. **The web form was writing plans
-  without recording them**, because the CLI and the web POST handler each
-  carried their own copy of the resolve/clamp/insert logic and had drifted.
-  Coaching memory paid for itself within an hour of existing.
+The mistake worth recording: I treated a human action as an anomaly and went
+hunting for a rogue writer, then "restored" the plan to my own last known value.
+That was not a restore; it overwrote a deliberate user change. **When the DB and
+my last known state disagree, the DB is authoritative — the user may simply have
+used the app.** Ask before reverting.
+
+The investigation did surface a REAL bug, independent of who clicked:
+
+- The CLI wrote a `system` coaching note on every plan change. **The web form
+  did not** — because the CLI handler and the web POST handler each carried
+  their own copy of the resolve/clamp/anchor/insert logic, and they had drifted.
+  A plan the user set in the browser was therefore invisible in their own
+  history, which is exactly what made it look mysterious.
 - Fix: `services/plan.py::set_active_plan()` — one seam both surfaces call,
-  mirroring `services/sync.py` / `services/clients.py`. The §8.6 clamp, the
-  start anchor, the entry-style resolution and the audit note now happen in
-  exactly one place. A test asserts the web form and the CLI are
-  indistinguishable.
+  mirroring `services/sync.py` / `services/clients.py`. Entry-style resolution,
+  the §8.6 clamp, the start anchor and the audit note now happen in exactly one
+  place. A test asserts a plan set via the web form is indistinguishable from one
+  set via the CLI, note included.
 - +10 tests. **439 green**; ruff + mypy clean.
 
-⚠️ The live plan was restored to **-1.00%/week, goal 75 kg, start 2026-07-20**
-(what it was). `plan` is append-only, so the stray rows remain visible in history.
+Plan restored to the user's own setting: **-0.50%/week, goal 75 kg, start
+2026-07-20** (1640 kcal/day, no floor clamp, currently AHEAD). `plan` is
+append-only so every intermediate row stays visible in history.
 
 ---
 
