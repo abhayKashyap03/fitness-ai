@@ -69,7 +69,7 @@ The post-membership path; the biggest open item. ADR-0012.
 
 ## P10 — Personal hardening
 
-- **[Next Up]** Coaching memory & consistency (persistent state, not context drift).
+- **[Done]** Coaching memory & consistency — ADR-0016, migration 0012; model reads, never writes.
 - **[Next Up]** Model routing + prompt-cache / COGS audit (§8.7).
 - **[Backlog]** MFP CSV backfill (Phase 6B — secondary; API path covers daily).
 - **[Next Up]** Expand the zero-fabrication eval set toward ~50 queries.

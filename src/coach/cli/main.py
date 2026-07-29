@@ -659,6 +659,7 @@ def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
     from datetime import UTC, date, datetime
 
     from ..compute.plan import rate_from_deadline, resolve_target_rate
+    from ..store.notes import SYSTEM, add_note
     from ..store.plan import PlanRow, insert_plan, plan_id
 
     today = _today(settings)
@@ -742,6 +743,21 @@ def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
                 protein_g_per_kg=args.protein,
                 note=note,
             ),
+        )
+        # Record the DECISION (not any measurement) so future sessions can see
+        # what was chosen and why — code-authored, never model-authored (ADR-0016).
+        goal_txt = f" toward {args.goal_weight}kg" if args.goal_weight is not None else ""
+        clamp_txt = " (clamped by the §8.6 ceiling)" if target.clamped else ""
+        add_note(
+            conn,
+            day_key=today,
+            kind="plan",
+            author=SYSTEM,
+            text=(
+                f"Set a {target.direction} at {target.rate_pct_per_week:+.2f}%/week"
+                f"{goal_txt}{clamp_txt}."
+            ),
+            user_id=settings.user_id,
         )
         conn.commit()
     finally:
@@ -840,6 +856,54 @@ def _cmd_web(settings: Settings, args: argparse.Namespace) -> int:
         )
     print(f"Dashboard: http://{args.host}:{args.port}  (Ctrl-C to stop)")
     uvicorn.run(create_app(settings), host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
+def _cmd_note_add(settings: Settings, args: argparse.Namespace) -> int:
+    """Record a coaching decision or observation (ADR-0016)."""
+    from ..store.notes import USER, add_note
+
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        row = add_note(
+            conn,
+            day_key=args.date or _today(settings),
+            text=args.text,
+            kind=args.kind,
+            author=USER,
+            user_id=settings.user_id,
+        )
+        conn.commit()
+    except ValueError as exc:
+        print(f"Cannot record that: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    print(f"Noted [{row.kind}] {row.day_key}: {row.text}")
+    return 0
+
+
+def _cmd_note_list(settings: Settings, args: argparse.Namespace) -> int:
+    from ..coach.tools import get_coach_notes
+
+    conn = db.connect(settings.db_path)
+    try:
+        out = get_coach_notes(conn, limit=args.limit, user_id=settings.user_id)
+    finally:
+        conn.close()
+
+    if args.json:
+        import json as _json
+
+        print(_json.dumps(out))
+        return 0
+    if not out["notes"]:
+        print("No coaching notes recorded yet.")
+        return 0
+    print(f"── Coaching memory · {out['count']} most recent ──")
+    for n in out["notes"]:
+        print(f"  {n['day_key']}  [{n['kind']}/{n['author']}]  {n['text']}")
     return 0
 
 
@@ -974,6 +1038,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_pst.add_argument("--window", type=int, default=14, help="TDEE window in days")
     p_pst.add_argument("--json", action="store_true", help="machine-readable output")
     p_pst.set_defaults(func=_cmd_plan_status)
+
+    p_note = sub.add_parser("note", help="coaching memory: past decisions and observations")
+    note_sub = p_note.add_subparsers(dest="note_command", required=True)
+    p_na = note_sub.add_parser("add", help="record a decision or observation")
+    p_na.add_argument("text", help="the note, quoted")
+    p_na.add_argument(
+        "--kind", default="note",
+        help="plan | advice | observation | note (default: note)",
+    )
+    p_na.add_argument("--date", default=None, help="day the note is about (default: today)")
+    p_na.set_defaults(func=_cmd_note_add)
+    p_nl = note_sub.add_parser("list", help="show recent notes")
+    p_nl.add_argument("--limit", type=int, default=20, help="how many (default 20)")
+    p_nl.add_argument("--json", action="store_true", help="machine-readable output")
+    p_nl.set_defaults(func=_cmd_note_list)
 
     p_web = sub.add_parser("web", help="serve the local dashboard (needs the [web] extra)")
     p_web.add_argument(
