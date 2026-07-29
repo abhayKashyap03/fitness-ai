@@ -183,9 +183,7 @@ def _cmd_ingest_whoop(settings: Settings, args: argparse.Namespace) -> int:
         if not args.since:
             print(f"  (incremental since {since})")
         client = _whoop_client(settings)
-        result = ingest_whoop(
-            conn, client, since=since, until=args.until, user_id=settings.user_id
-        )
+        result = ingest_whoop(conn, client, since=since, until=args.until, user_id=settings.user_id)
     except ReauthRequired as exc:
         print(f"WHOOP auth needed: {exc}", file=sys.stderr)
         return 1
@@ -376,7 +374,9 @@ def _print_plan_line(settings: Settings, date: str) -> None:
         return
     pl = p["plan"]
     if p["status"] is None:
-        print(f"  plan [{pl['direction']} {pl['target_rate_pct_per_week']:+.2f}%/wk]: goal — (need TDEE + trend)")
+        print(
+            f"  plan [{pl['direction']} {pl['target_rate_pct_per_week']:+.2f}%/wk]: goal — (need TDEE + trend)"
+        )
         return
     st = p["status"]
     goal = f" · goal {_fmt(st['goal_weight_kg'], 'kg')}" if st["goal_weight_kg"] is not None else ""
@@ -436,9 +436,7 @@ def _build_provider(settings: Settings):
     from ..coach.llm import build_provider
 
     settings.require_llm()
-    return build_provider(
-        settings.llm_provider, settings.llm_api_key, model=settings.coach_model
-    )
+    return build_provider(settings.llm_provider, settings.llm_api_key, model=settings.coach_model)
 
 
 def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
@@ -492,7 +490,9 @@ def _cmd_eval_grounding(settings: Settings, _args: argparse.Namespace) -> int:
         failed += int(not r["passed"])
         print(f"  [{status}] {r['scenario']}  tools={r['tool_calls']} rounds={r['rounds']}")
         if not r["passed"]:
-            print(f"         admits_absence={r['admits_absence']} fabricated={r['fabricated_numbers']}")
+            print(
+                f"         admits_absence={r['admits_absence']} fabricated={r['fabricated_numbers']}"
+            )
             print(f"         answer: {r['answer'][:300]}")
     print(f"{len(results) - failed}/{len(results)} scenarios passed (target: zero fabrications)")
     return 0 if failed == 0 else 1
@@ -565,7 +565,10 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
             else:
                 version = 0
                 pending = db.discover_migrations()
-            print(f"  schema:         v{version}" + (f"  (PENDING: {len(pending)})" if pending else "  (up to date)"))
+            print(
+                f"  schema:         v{version}"
+                + (f"  (PENDING: {len(pending)})" if pending else "  (up to date)")
+            )
             if pending:
                 problems += 1
                 print("                  -> run `coach db init`")
@@ -592,7 +595,9 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
             problems += 1
             print("  whoop token:    MISSING -> run `coach auth whoop`")
         elif tokens.is_expired():
-            print(f"  whoop token:    expired {tokens.expires_at.isoformat()} (auto-refresh on use)")
+            print(
+                f"  whoop token:    expired {tokens.expires_at.isoformat()} (auto-refresh on use)"
+            )
         else:
             print(f"  whoop token:    valid until {tokens.expires_at.isoformat()}")
     except ConfigError:
@@ -654,122 +659,43 @@ def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
-    """Set the active cut/bulk plan (ADR-0013). Accepts a %/week rate OR a
-    goal-weight+deadline (converted to a rate); the rate is always §8.6-clamped."""
-    from datetime import UTC, date, datetime
-
-    from ..compute.plan import rate_from_deadline, resolve_target_rate
-    from ..store.notes import SYSTEM, add_note
-    from ..store.plan import PlanRow, insert_plan, plan_id
+    """Set the active plan. All resolution/clamping lives in the service seam so
+    the CLI and the web form cannot drift (services/plan.py)."""
+    from ..services.plan import PlanInputError, set_active_plan
 
     today = _today(settings)
     conn = db.connect(settings.db_path)
     try:
         _ensure_migrated(conn)
-        row = conn.execute(
-            "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
-            "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",
-            (settings.user_id, today),
-        ).fetchone()
-        current_trend = row["trend_kg"] if row else None
-
-        # start anchor — default today/current-trend, but a mid-cut user can
-        # backdate it so progress-so-far and adherence read truthfully.
-        start_day = args.start_date or today
-        start_weight = args.start_weight
-        if start_weight is None and args.start_date:
-            srow = conn.execute(
-                "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
-                "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",
-                (settings.user_id, args.start_date),
-            ).fetchone()
-            start_weight = srow["trend_kg"] if srow else None
-            if start_weight is None:
-                print(
-                    f"No weight trend on/before --start-date {args.start_date}; "
-                    "pass --start-weight to anchor progress explicitly.",
-                    file=sys.stderr,
-                )
-                return 1
-        elif start_weight is None:
-            start_weight = current_trend
-
-        note_extra = None
-        if args.maintain:
-            requested = 0.0
-        elif args.rate is not None:
-            requested = args.rate
-        elif args.goal_weight is not None and args.by is not None:
-            if current_trend is None:
-                print(
-                    "Deadline entry needs a current weight trend, and there is none yet. "
-                    "Log some weight first, or set a --rate directly.",
-                    file=sys.stderr,
-                )
-                return 1
-            weeks = (date.fromisoformat(args.by) - date.fromisoformat(today)).days / 7
-            if weeks <= 0:
-                print(f"--by must be a future date (got {args.by}).", file=sys.stderr)
-                return 2
-            requested = rate_from_deadline(
-                current_weight_kg=current_trend, goal_weight_kg=args.goal_weight, weeks=weeks
-            )
-            note_extra = f"deadline entry {args.goal_weight}kg by {args.by}"
-        else:
-            print(
-                "Specify one of: --rate PCT_PER_WEEK, --goal-weight KG --by YYYY-MM-DD, "
-                "or --maintain.",
-                file=sys.stderr,
-            )
-            return 2
-
-        target = resolve_target_rate(requested)
-        note = target.note
-        if note_extra:
-            note = f"{note_extra}; {note}" if note else note_extra
-
-        created_at = datetime.now(UTC).isoformat()
-        insert_plan(
+        result = set_active_plan(
             conn,
-            PlanRow(
-                id=plan_id(settings.user_id, created_at),
-                user_id=settings.user_id,
-                created_at=created_at,
-                start_day_key=start_day,
-                direction=target.direction,
-                target_rate_pct_per_week=target.rate_pct_per_week,
-                start_weight_kg=start_weight,
-                goal_weight_kg=args.goal_weight,
-                protein_g_per_kg=args.protein,
-                note=note,
-            ),
-        )
-        # Record the DECISION (not any measurement) so future sessions can see
-        # what was chosen and why — code-authored, never model-authored (ADR-0016).
-        goal_txt = f" toward {args.goal_weight}kg" if args.goal_weight is not None else ""
-        clamp_txt = " (clamped by the §8.6 ceiling)" if target.clamped else ""
-        add_note(
-            conn,
-            day_key=today,
-            kind="plan",
-            author=SYSTEM,
-            text=(
-                f"Set a {target.direction} at {target.rate_pct_per_week:+.2f}%/week"
-                f"{goal_txt}{clamp_txt}."
-            ),
+            today=today,
+            rate=args.rate,
+            goal_weight=args.goal_weight,
+            by=args.by,
+            maintain=args.maintain,
+            protein=args.protein,
+            start_date=args.start_date,
+            start_weight=args.start_weight,
             user_id=settings.user_id,
         )
         conn.commit()
+    except PlanInputError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     finally:
         conn.close()
 
-    print(
-        f"Plan set: {target.direction} at {target.rate_pct_per_week:+.2f}%/week"
-        + (f" (start {start_weight:.2f}kg @ {start_day})" if start_weight is not None else "")
-        + (f", goal {args.goal_weight}kg" if args.goal_weight is not None else "")
+    row = result.row
+    anchor = (
+        f" (start {row.start_weight_kg:.2f}kg @ {row.start_day_key})"
+        if row.start_weight_kg is not None
+        else ""
     )
-    if target.clamped:
-        print(f"  ⚠ {target.note}")
+    goal = f", goal {row.goal_weight_kg}kg" if row.goal_weight_kg is not None else ""
+    print(f"Plan set: {row.direction} at {row.target_rate_pct_per_week:+.2f}%/week{anchor}{goal}")
+    if result.clamped:
+        print(f"  ⚠ {result.note}")
     print("Run `coach plan status` for the daily calorie goal.")
     return 0
 
@@ -801,7 +727,9 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         print(f"  start weight:     {pl['start_weight_kg']:.2f} kg ({pl['start_day_key']})")
     if p["status"] is None:
         need = p["insufficient"]
-        print(f"  daily goal:       — (insufficient data: need {need['needed']}, have {need['have']})")
+        print(
+            f"  daily goal:       — (insufficient data: need {need['needed']}, have {need['have']})"
+        )
         return 0
     st = p["status"]
     print(f"  measured TDEE:    {st['tdee_kcal']:.0f} kcal/day")
@@ -837,7 +765,7 @@ def _cmd_web(settings: Settings, args: argparse.Namespace) -> int:
     except ImportError as exc:
         print(
             f"The web UI needs the optional [web] extra ({exc.name} missing).\n"
-            "  pip install -e \".[web]\"",
+            '  pip install -e ".[web]"',
             file=sys.stderr,
         )
         return 2
@@ -918,7 +846,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_status = db_sub.add_parser("status", help="report current schema version")
     p_status.set_defaults(func=_cmd_db_status)
     p_backup = db_sub.add_parser("backup", help="consistent online snapshot of the DB")
-    p_backup.add_argument("--to", default=None, help="destination path (default: <db dir>/backups/)")
+    p_backup.add_argument(
+        "--to", default=None, help="destination path (default: <db dir>/backups/)"
+    )
     p_backup.set_defaults(func=_cmd_db_backup)
     p_verify = db_sub.add_parser("verify", help="integrity check + row counts + fingerprint")
     p_verify.set_defaults(func=_cmd_db_verify)
@@ -949,7 +879,8 @@ def build_parser() -> argparse.ArgumentParser:
         "mfp", help="ingest MyFitnessPal food diary via its v2 API (session cookie)"
     )
     p_im.add_argument(
-        "--since", default=None,
+        "--since",
+        default=None,
         help="ISO date start of window (default: incremental from last ingest)",
     )
     p_im.add_argument(
@@ -1004,7 +935,8 @@ def build_parser() -> argparse.ArgumentParser:
         "sync", help="one-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize"
     )
     p_sync.add_argument(
-        "--hk-file", default=None,
+        "--hk-file",
+        default=None,
         help="ALSO ingest an Apple Health export (occasional weight backfill; not part of the daily path)",
     )
     p_sync.set_defaults(func=_cmd_sync)
@@ -1015,7 +947,9 @@ def build_parser() -> argparse.ArgumentParser:
         "set", help="set the active plan (--rate | --goal-weight --by | --maintain)"
     )
     p_ps.add_argument(
-        "--rate", type=float, default=None,
+        "--rate",
+        type=float,
+        default=None,
         help="signed %%/week target (e.g. -0.5 to cut, 0.25 to bulk)",
     )
     p_ps.add_argument("--goal-weight", type=float, default=None, help="goal weight in kg")
@@ -1024,16 +958,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ps.add_argument("--protein", type=float, default=None, help="protein floor g/kg (optional)")
     p_ps.add_argument(
-        "--start-date", default=None,
+        "--start-date",
+        default=None,
         help="backdate the plan start YYYY-MM-DD (already mid-cut); anchors progress",
     )
     p_ps.add_argument(
-        "--start-weight", type=float, default=None,
+        "--start-weight",
+        type=float,
+        default=None,
         help="start weight in kg (defaults to the trend at --start-date, else today's trend)",
     )
     p_ps.add_argument("--maintain", action="store_true", help="maintenance plan (rate 0)")
     p_ps.set_defaults(func=_cmd_plan_set)
-    p_pst = plan_sub.add_parser("status", help="daily calorie goal + projection for the active plan")
+    p_pst = plan_sub.add_parser(
+        "status", help="daily calorie goal + projection for the active plan"
+    )
     p_pst.add_argument("--end", default=None, help="day_key YYYY-MM-DD (default: today)")
     p_pst.add_argument("--window", type=int, default=14, help="TDEE window in days")
     p_pst.add_argument("--json", action="store_true", help="machine-readable output")
@@ -1044,7 +983,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_na = note_sub.add_parser("add", help="record a decision or observation")
     p_na.add_argument("text", help="the note, quoted")
     p_na.add_argument(
-        "--kind", default="note",
+        "--kind",
+        default="note",
         help="plan | advice | observation | note (default: note)",
     )
     p_na.add_argument("--date", default=None, help="day the note is about (default: today)")
@@ -1056,7 +996,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_web = sub.add_parser("web", help="serve the local dashboard (needs the [web] extra)")
     p_web.add_argument(
-        "--host", default="127.0.0.1",
+        "--host",
+        default="127.0.0.1",
         help="bind address (default localhost; anything else exposes health data un-authed)",
     )
     p_web.add_argument("--port", type=int, default=8000, help="port (default 8000)")

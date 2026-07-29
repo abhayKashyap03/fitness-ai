@@ -7,7 +7,7 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **429 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
+- **439 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
   PRs #12–#19 merged; #20 (web UI) and #21 (MFP training + watermark) open.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
@@ -62,6 +62,31 @@ computes it (§2.2), clamped by the guardrails (§8.6).
   calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
   (ADR-0005) — by design, fills in with a few more days.
 - +26 plan tests. **328 tests green; ruff + mypy clean.**
+
+---
+
+## Session 2026-07-29 — one plan-set seam (found by using the dashboard)
+
+Opened the web dashboard to look at the now-live plan card and it showed a plan
+(-0.50%/week) that had NOT been set from the CLI. Investigated rather than
+assumed:
+
+- Ruled out pytest empirically (row count unchanged across a full run) — the
+  first hypothesis, and it was wrong.
+- The coaching-note trail settled it: every CLI `plan set` had written a
+  `system` note; the -0.50 rows had none. **The web form was writing plans
+  without recording them**, because the CLI and the web POST handler each
+  carried their own copy of the resolve/clamp/insert logic and had drifted.
+  Coaching memory paid for itself within an hour of existing.
+- Fix: `services/plan.py::set_active_plan()` — one seam both surfaces call,
+  mirroring `services/sync.py` / `services/clients.py`. The §8.6 clamp, the
+  start anchor, the entry-style resolution and the audit note now happen in
+  exactly one place. A test asserts the web form and the CLI are
+  indistinguishable.
+- +10 tests. **439 green**; ruff + mypy clean.
+
+⚠️ The live plan was restored to **-1.00%/week, goal 75 kg, start 2026-07-20**
+(what it was). `plan` is append-only, so the stray rows remain visible in history.
 
 ---
 

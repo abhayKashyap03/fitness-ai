@@ -202,87 +202,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         by: str | None = Form(None),
         start_date: str | None = Form(None),
     ) -> Any:
-        """Set the active plan. The §8.6 clamp is applied by compute, not here."""
-        from datetime import UTC
+        """Set the active plan through the SAME service the CLI uses.
 
-        from ..compute.plan import rate_from_deadline, resolve_target_rate
-        from ..store.plan import PlanRow, insert_plan, plan_id
+        This handler used to carry its own copy of the resolution/clamp logic and
+        silently skipped the coaching note the CLI wrote — so a plan changed here
+        left no trace in memory. One seam, no drift (services/plan.py).
+        """
+        from ..services.plan import PlanInputError, set_active_plan
 
         day = _today(cfg)
-        error: str | None = None
         with _conn() as conn:
-            trend_row = conn.execute(
-                "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
-                "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",
-                (cfg.user_id, day),
-            ).fetchone()
-            current_trend = trend_row["trend_kg"] if trend_row else None
-
-            requested: float | None = None
-            note_extra: str | None = None
-            if mode == "maintain":
-                requested = 0.0
-            elif mode == "rate" and rate is not None:
-                requested = rate
-            elif mode == "deadline" and goal_weight is not None and by:
-                if current_trend is None:
-                    error = (
-                        "Deadline entry needs a current weight trend, and there is none yet. "
-                        "Log some weight first, or set a rate directly."
-                    )
-                else:
-                    weeks = (date.fromisoformat(by) - date.fromisoformat(day)).days / 7
-                    if weeks <= 0:
-                        error = f"Deadline must be a future date (got {by})."
-                    else:
-                        requested = rate_from_deadline(
-                            current_weight_kg=current_trend,
-                            goal_weight_kg=goal_weight,
-                            weeks=weeks,
-                        )
-                        note_extra = f"deadline entry {goal_weight}kg by {by}"
-            else:
-                error = "Specify a rate, a goal weight + deadline, or maintain."
-
-            if error is None and requested is not None:
-                target = resolve_target_rate(requested)
-                note = target.note
-                if note_extra:
-                    note = f"{note_extra}; {note}" if note else note_extra
-
-                start_day = start_date or day
-                start_weight = current_trend
-                if start_date:
-                    srow = conn.execute(
-                        "SELECT trend_kg FROM weight_trend WHERE user_id = ? AND day_key <= ? "
-                        "AND trend_kg IS NOT NULL ORDER BY day_key DESC LIMIT 1",
-                        (cfg.user_id, start_date),
-                    ).fetchone()
-                    start_weight = srow["trend_kg"] if srow else None
-
-                created_at = datetime.now(UTC).isoformat()
-                insert_plan(
+            try:
+                set_active_plan(
                     conn,
-                    PlanRow(
-                        id=plan_id(cfg.user_id, created_at),
-                        user_id=cfg.user_id,
-                        created_at=created_at,
-                        start_day_key=start_day,
-                        direction=target.direction,
-                        target_rate_pct_per_week=target.rate_pct_per_week,
-                        start_weight_kg=start_weight,
-                        goal_weight_kg=goal_weight,
-                        note=note,
-                    ),
+                    today=day,
+                    rate=rate if mode == "rate" else None,
+                    goal_weight=goal_weight if mode == "deadline" else None,
+                    by=by if mode == "deadline" else None,
+                    maintain=(mode == "maintain"),
+                    start_date=start_date or None,
+                    user_id=cfg.user_id,
                 )
                 conn.commit()
-
-            if error is not None:
+            except PlanInputError as exc:
                 plan = tools.get_plan_status(conn, end=day, user_id=cfg.user_id)
                 return templates.TemplateResponse(
                     request=request,
                     name="plan.html",
-                    context={"day": day, "plan": plan, "error": error},
+                    context={"day": day, "plan": plan, "error": str(exc)},
                     status_code=400,
                 )
         return RedirectResponse(url="/plan", status_code=303)
