@@ -37,7 +37,12 @@ projected timeline, on/off-track delta). Two natural framings:
   Guardrails (`compute/guardrails.py`) stay the single source of hard limits
   (§8.6), never the prompt.
 - **No fake precision.** A deadline the floor can't honor stretches the projected
-  timeline honestly instead of promising a date.
+  timeline honestly instead of promising a date. **This is enforced in
+  `plan_status` via `effective_rate_kg_per_week`** — when the calorie floor
+  binds, the achievable rate is derived from the CLAMPED goal, and the timeline
+  and adherence label are both judged against that. (Found live 2026-07-28: the
+  projection was using the target rate, so it promised exactly the date the
+  floor forbade — the opposite of what this ADR states.)
 - **One stored quantity, either entry style** — both `--rate` and
   `--goal-weight --by` reduce to the same clamped rate; no dual code paths past
   the CLI boundary.

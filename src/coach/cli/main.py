@@ -793,7 +793,7 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
     print(f"  target rate:      {st['target_rate_kg_per_week']:+.3f} kg/week")
     print(
         f"  daily goal:       {st['calorie_goal_kcal']:.0f} kcal/day "
-        f"(TDEE {st['daily_kcal_delta']:+.0f})"
+        f"(TDEE {st['effective_daily_kcal_delta']:+.0f})"
         + ("  [floor-clamped]" if st["floor_clamped"] else "")
     )
     if st["weeks_to_goal"] is not None:

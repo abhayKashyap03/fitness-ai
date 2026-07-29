@@ -28,7 +28,7 @@
       <div class="row"><span class="k">target rate</span><span class="v">{{ m.signed(ps.target_rate_kg_per_week, ' kg/week', 3) }}</span></div>
       <div class="row"><span class="k">daily goal</span>
         <span class="v"><strong>{{ m.val(ps.calorie_goal_kcal, ' kcal', 0) }}</strong>
-          (TDEE {{ m.signed(ps.daily_kcal_delta, '', 0) }}){{ ' — floor-clamped' if ps.floor_clamped }}</span></div>
+          (TDEE {{ m.signed(ps.effective_daily_kcal_delta, '', 0) }}){{ ' — floor-clamped' if ps.floor_clamped }}</span></div>
       {% if ps.weeks_to_goal is not none %}
         <div class="row"><span class="k">projection</span><span class="v">~{{ ps.weeks_to_goal }} weeks → {{ ps.projected_goal_day }}</span></div>
       {% endif %}
