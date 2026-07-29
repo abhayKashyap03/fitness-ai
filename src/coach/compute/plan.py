@@ -48,7 +48,15 @@ class PlanStatus:
     direction: str
     target_rate_pct_per_week: float
     target_rate_kg_per_week: float
-    daily_kcal_delta: float  # signed; added to TDEE to get the goal
+    # What the clamped goal ACTUALLY buys. Equals the target rate unless the
+    # §8.6 calorie floor bound; then it is slower, and it is what the timeline
+    # and adherence are judged against.
+    effective_rate_kg_per_week: float
+    daily_kcal_delta: float  # signed; the TARGET's implied delta
+    # The delta the goal you were actually given represents. Differs from
+    # daily_kcal_delta only when the floor clamped; surfaces must show THIS
+    # so the arithmetic on screen is self-consistent (goal = TDEE + delta).
+    effective_daily_kcal_delta: float
     calorie_goal_kcal: float  # after the §8.6 floor clamp
     floor_clamped: bool
     goal_weight_kg: float | None
@@ -179,13 +187,20 @@ def plan_status(
     if floor_alert is not None:
         alerts.append(floor_alert)
 
+    # The floor clamp changes what you will actually eat, so it changes the rate
+    # you can actually achieve. ADR-0013 promises the timeline STRETCHES rather
+    # than promising a date the safety floor forbids — so everything downstream
+    # is judged against the clamped goal, not the target that implied it.
+    # Unclamped, this is identical to the target rate.
+    effective_rate_kg_per_week = (calorie_goal - tdee_kcal) * 7 / kcal_per_kg
+
     weeks_to_goal: float | None = None
     projected_goal_day: str | None = None
-    if goal_weight_kg is not None and rate_kg_per_week != 0:
+    if goal_weight_kg is not None and effective_rate_kg_per_week != 0:
         remaining = goal_weight_kg - current_trend_kg
         # only project when the rate actually moves toward the goal
-        if (remaining > 0) == (rate_kg_per_week > 0):
-            weeks_to_goal = remaining / rate_kg_per_week
+        if (remaining > 0) == (effective_rate_kg_per_week > 0):
+            weeks_to_goal = remaining / effective_rate_kg_per_week
             if end_day is not None:
                 projected_goal_day = (
                     date.fromisoformat(end_day) + timedelta(days=round(weeks_to_goal * 7))
@@ -203,7 +218,10 @@ def plan_status(
             elapsed_days = span
             kg_changed_so_far = current_trend_kg - start_weight_kg
             actual_rate_kg_per_week = kg_changed_so_far / span * 7
-            adherence = adherence_label(actual_rate_kg_per_week, rate_kg_per_week)
+            # Judge against what is achievable under the floor, not an
+            # unreachable target — otherwise a clamped plan reads 'behind'
+            # forever no matter how faithfully it is followed.
+            adherence = adherence_label(actual_rate_kg_per_week, effective_rate_kg_per_week)
 
     return PlanStatus(
         tdee_kcal=round(tdee_kcal, 1),
@@ -211,7 +229,9 @@ def plan_status(
         direction=direction,
         target_rate_pct_per_week=target_rate_pct_per_week,
         target_rate_kg_per_week=round(rate_kg_per_week, 4),
+        effective_rate_kg_per_week=round(effective_rate_kg_per_week, 4),
         daily_kcal_delta=round(daily_kcal_delta, 1),
+        effective_daily_kcal_delta=round(calorie_goal - tdee_kcal, 1),
         calorie_goal_kcal=round(calorie_goal, 0),
         floor_clamped=floor_clamped,
         goal_weight_kg=goal_weight_kg,

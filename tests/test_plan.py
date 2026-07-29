@@ -310,3 +310,73 @@ def test_get_plan_status_tool_insufficient_without_data(migrated_conn):
     # The REAL reason propagates (TDEE needs 10 logged-intake days), not a
     # flattened "need 1, have 0" that tells the user nothing actionable.
     assert out["insufficient"] == {"have": 0, "needed": 10}
+
+
+# ---- the §8.6 floor must stretch the timeline, not fake it ------------------
+
+
+def _clamped():
+    """TDEE 2000 with a -1%/wk target on 80kg: implies 1114 kcal, below the floor."""
+    return plan_status(
+        direction="cut",
+        target_rate_pct_per_week=-1.0,
+        goal_weight_kg=72.0,
+        tdee_kcal=2000.0,
+        current_trend_kg=80.0,
+        end_day="2026-07-28",
+    )
+
+
+def test_floor_clamped_goal_is_self_consistent():
+    """goal == TDEE + effective delta, so the numbers on screen add up."""
+    st = _clamped()
+    assert not isinstance(st, Insufficient)
+    assert st.floor_clamped is True
+    assert st.calorie_goal_kcal == pytest.approx(2000.0 + st.effective_daily_kcal_delta, abs=0.5)
+    # the target's implied delta is steeper than what the floor actually allows
+    assert st.daily_kcal_delta < st.effective_daily_kcal_delta
+
+
+def test_floor_clamped_projection_uses_the_achievable_rate():
+    """ADR-0013 promises the timeline stretches rather than promising an unsafe
+    date. Projecting from the target rate would promise exactly that date."""
+    st = _clamped()
+    assert not isinstance(st, Insufficient)
+    # floor allows 2000-1200 = 800 kcal/day = 0.727 kg/wk, not the 0.8 target
+    assert st.effective_rate_kg_per_week == pytest.approx(-0.7273, abs=1e-3)
+    assert abs(st.effective_rate_kg_per_week) < abs(st.target_rate_kg_per_week)
+    # 8 kg to go: 11.0 weeks at the achievable rate, 10.0 at the target
+    assert st.weeks_to_goal == pytest.approx(11.0, abs=0.1)
+
+
+def test_unclamped_plan_is_unchanged_by_the_effective_rate():
+    """The fix must be a no-op whenever the floor doesn't bind."""
+    st = plan_status(
+        direction="cut",
+        target_rate_pct_per_week=-0.5,
+        goal_weight_kg=76.0,
+        tdee_kcal=2500.0,
+        current_trend_kg=80.0,
+        end_day="2026-07-26",
+    )
+    assert not isinstance(st, Insufficient)
+    assert st.floor_clamped is False
+    assert st.effective_rate_kg_per_week == pytest.approx(st.target_rate_kg_per_week)
+    assert st.effective_daily_kcal_delta == pytest.approx(st.daily_kcal_delta)
+    assert st.projected_goal_day == "2026-10-04"  # unchanged from before the fix
+
+
+def test_clamped_adherence_is_judged_against_what_is_achievable():
+    """Following a clamped plan perfectly must not read as 'behind' forever."""
+    st = plan_status(
+        direction="cut",
+        target_rate_pct_per_week=-1.0,
+        goal_weight_kg=72.0,
+        tdee_kcal=2000.0,
+        current_trend_kg=80.0,
+        end_day="2026-07-28",
+        start_day_key="2026-06-28",
+        start_weight_kg=83.12,  # -3.12 kg / 30d = -0.728 kg/wk, the achievable rate
+    )
+    assert not isinstance(st, Insufficient)
+    assert st.adherence == "on_track"

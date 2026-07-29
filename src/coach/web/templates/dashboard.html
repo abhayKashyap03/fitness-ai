@@ -30,7 +30,7 @@
     </div>
     {% if ps %}
       <div class="big">{{ m.val(ps.calorie_goal_kcal, ' kcal', 0) }}<span class="note"> / day</span></div>
-      <div class="row"><span class="k">vs TDEE</span><span class="v">{{ m.signed(ps.daily_kcal_delta, ' kcal', 0) }}</span></div>
+      <div class="row"><span class="k">vs TDEE</span><span class="v">{{ m.signed(ps.effective_daily_kcal_delta, ' kcal', 0) }}</span></div>
       {% if ps.floor_clamped %}<div class="alert">Clamped up to the calorie floor (§8.6).</div>{% endif %}
       {% if ps.projected_goal_day %}
         <div class="row"><span class="k">projected</span><span class="v">{{ ps.goal_weight_kg }}kg by {{ ps.projected_goal_day }}</span></div>

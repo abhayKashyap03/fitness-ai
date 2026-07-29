@@ -7,7 +7,7 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **415 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
+- **419 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
   PRs #12–#19 merged; #20 (web UI) and #21 (MFP training + watermark) open.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
@@ -62,6 +62,36 @@ computes it (§2.2), clamped by the guardrails (§8.6).
   calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
   (ADR-0005) — by design, fills in with a few more days.
 - +26 plan tests. **328 tests green; ruff + mypy clean.**
+
+---
+
+## Session 2026-07-28 (b) — plan layer live on real data; floor-clamp projection bug
+
+Ran the daily driver and verified the plan layer end-to-end for the first time.
+
+- **T7.5 fully complete.** Adaptive TDEE crossed its 10-logged-intake-day gate
+  (ADR-0005), so the plan now emits a REAL daily goal: TDEE **2040 kcal**, trend
+  82.67 kg, goal 75 kg, adherence **ON_TRACK** (-0.86 kg over 8 days).
+- **Per-type watermark confirmed in production:** sync reported "incremental
+  since 2026-07-26" where it used to be stuck at 07-21.
+- **Bug found by the real numbers (fixed here).** The §8.6 calorie floor bound
+  for the first time (a -1%/wk target on a 2040 TDEE implies 1131 kcal, below
+  the 1200 floor). ADR-0013 promises the timeline "stretches rather than
+  promising an unsafe date" — but `plan_status` projected from the TARGET rate,
+  so it promised exactly the date the floor forbids. Added
+  `effective_rate_kg_per_week` (derived from the CLAMPED goal); timeline and
+  adherence are now judged against what is actually achievable. Live: the
+  projection honestly moved 9.3 → 10.0 weeks (Oct 1 → Oct 6).
+  Also added `effective_daily_kcal_delta` so surfaces are self-consistent —
+  the CLI showed "1200 kcal/day (TDEE -909)", which doesn't add up; now -840.
+  Adherence is judged against the achievable rate too, so faithfully following
+  a clamped plan no longer reads "behind" forever.
+- HRV verdict still **NOISE** (autocorr +0.21 < 0.3). `coach doctor`: all clear.
+
+**For the human:** the -1.00%/week target is at the §8.6 ceiling AND the calorie
+floor is binding, so the target rate is not achievable within the safety limits.
+Either the timeline stretches (as it now honestly shows) or the target eases.
+That is a decision for the user, not the tool.
 
 ---
 
