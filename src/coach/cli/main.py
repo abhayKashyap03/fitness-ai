@@ -507,6 +507,62 @@ def _cmd_eval_grounding(settings: Settings, args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
+def _fmt_agreement(name: str, got: object) -> str:
+    """One metric's agreement line, or an honest insufficient marker."""
+    from ..compute.calibration import Agreement
+    from ..compute.trends import Insufficient
+
+    if isinstance(got, Insufficient):
+        return f"  {name:16} insufficient overlap (shared days {got.have}, need {got.needed})"
+    assert isinstance(got, Agreement)
+    return (
+        f"  {name:16} n={got.n:4}  bias={got.mean_bias:+.3f}  "
+        f"MAE={got.mae:.3f}  {_fmt_corr(got.correlation)}"
+    )
+
+
+def _cmd_eval_calibration(settings: Settings, args: argparse.Namespace) -> int:
+    """Cross-source agreement (ADR-0012). Deterministic; no tokens, no network.
+
+    Built for the post-membership question — does our recomputed WHOOP metric
+    track the official one? — but deliberately runnable TODAY on weight, where
+    two writers already overlap. The machinery should not be first exercised on
+    the day the membership lapses.
+    """
+    from ..compute.calibration import (
+        SourceSpec,
+        calibration_report,
+        weight_calibration_report,
+    )
+
+    conn = db.connect(settings.db_path)
+    try:
+        if args.domain in ("weight", "all"):
+            a = SourceSpec.parse(args.a or "healthkit:okok")
+            b = SourceSpec.parse(args.b or "myfitnesspal")
+            print(f"── Weight calibration · {b} vs {a} (reference) ──")
+            report = weight_calibration_report(conn, spec_a=a, spec_b=b, user_id=settings.user_id)
+            for metric, got in report.items():
+                print(_fmt_agreement(metric, got))
+            print()
+        if args.domain in ("recovery", "all"):
+            ra = args.a or "whoop_api"
+            rb = args.b or "whoop_ble"
+            if args.domain == "all":
+                ra, rb = "whoop_api", "whoop_ble"
+            print(f"── Recovery calibration · {rb} vs {ra} (reference) ──")
+            rec = calibration_report(conn, source_a=ra, source_b=rb, user_id=settings.user_id)
+            for metric, got in rec.items():
+                print(_fmt_agreement(metric, got))
+            print(
+                "  (whoop_ble rows appear once the BLE adapter lands — ADR-0012. "
+                "Insufficient here is expected, not a fault.)"
+            )
+    finally:
+        conn.close()
+    return 0
+
+
 def _fmt_corr(c: object) -> str:
     from ..compute.hrv_validation import Correlation
     from ..compute.trends import Insufficient
@@ -943,6 +999,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_eh.add_argument("--end", default=None, help="end day_key (default: today in COACH_HOME_TZ)")
     p_eh.add_argument("--window", type=int, default=90, help="lookback window in days (default 90)")
     p_eh.set_defaults(func=_cmd_eval_hrv)
+
+    p_ecal = eval_sub.add_parser(
+        "calibration", help="cross-source agreement: bias/MAE/correlation (ADR-0012)"
+    )
+    p_ecal.add_argument(
+        "--domain",
+        choices=("weight", "recovery", "all"),
+        default="all",
+        help="which metric family to compare (default: all)",
+    )
+    p_ecal.add_argument("--a", help="reference source, 'source[:source_app]'")
+    p_ecal.add_argument("--b", help="source under test, 'source[:source_app]'")
+    p_ecal.set_defaults(func=_cmd_eval_calibration)
 
     p_doctor = sub.add_parser("doctor", help="config/db/token/data sanity report")
     p_doctor.set_defaults(func=_cmd_doctor)
