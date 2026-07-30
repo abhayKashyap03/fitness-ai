@@ -13,6 +13,8 @@ exists. There was nothing to optimize *against*: `coach ask` printed a token
 count to stderr and discarded it, and the eval (50 agent loops, the biggest
 single spend) reported no usage at all.
 
+- **[ADR-0017](docs/adr/0017-llm-cost-accounting.md)** records the two load-bearing
+  calls (rates on the row; unpriced never free).
 - **Migration 0013 `llm_call`** — append-only, code-authored primary data like
   `plan`/`coach_note`; no `raw_ref`, excluded from the rebuild fingerprint by
   construction (a test asserts asking a question can't make `--rebuild` look

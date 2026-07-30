@@ -1,5 +1,5 @@
 -- ============================================================
---  Migration 0013 — `llm_call` (token + cost accounting, §8.7)
+--  Migration 0013 — `llm_call` (token + cost accounting, §8.7, ADR-0017)
 --
 --  The Anthropic/xAI/Google API is the project's only meaningful running cost,
 --  and §8.7 asks for cost control. `coach ask` printed a token count to stderr

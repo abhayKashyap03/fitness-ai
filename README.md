@@ -91,7 +91,8 @@ cache-hit rate, and a per-command split. Cost in currency is opt-in — set
 empty and spend reads **UNPRICED** rather than free: the project doesn't ship
 guessed per-token prices, because a wrong rate becomes a wrong "you spent $X".
 Rates are stamped onto each call as it happens, so changing them later never
-rewrites what past calls cost.
+rewrites what past calls cost
+([ADR-0017](docs/adr/0017-llm-cost-accounting.md)).
 
 An occasional Apple Health export ingests with
 `coach ingest healthkit --file export.zip` (or `coach sync --hk-file …`).
