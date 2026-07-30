@@ -182,6 +182,38 @@ def test_admits_absence_detects_honest_phrasing():
     assert not admits_absence("Your recovery was 62 and trending up.")
 
 
+# Real answers from a live run (2026-07-29) that the scorer marked FAIL with
+# fabricated=[] and omitted=[] — i.e. it rejected perfectly faithful replies.
+# The old substring list enumerated noun phrases and matched none of these.
+# Kept verbatim as fixtures: these are observed model behavior, not invented
+# examples, and they are what the scorer must never reject again.
+LIVE_ABSENCE_ANSWERS = [
+    "You had no training sessions logged on 2026-05-01.",
+    "No cut/bulk plan is currently set.",
+    "There is no active plan.",
+    "You have no plan set right now.",
+    "Nothing has been logged for that day.",
+    "No workouts were recorded on 2026-05-01.",
+    "I have no record of any food for that date.",
+    "Your sleep wasn't recorded that night.",
+    "That metric is not available yet.",
+]
+
+
+@pytest.mark.parametrize("answer", LIVE_ABSENCE_ANSWERS)
+def test_admits_absence_accepts_real_live_phrasings(answer):
+    assert admits_absence(answer), f"false FAIL: {answer!r} is an honest absence admission"
+
+
+def test_admits_absence_still_rejects_a_confident_answer():
+    """Leniency must not swallow the thing it exists to catch."""
+    assert not admits_absence("Your recovery was 71 and your HRV was 62 ms.")
+    assert not admits_absence("You ate 1800 calories and trained for 45 minutes.")
+    assert not admits_absence("Your trend is 82.6 kg, down 0.4 kg this week.")
+    # "no" in an unrelated clause is not an absence claim
+    assert not admits_absence("There is no need to change anything; recovery is 71.")
+
+
 def test_fabricated_numbers_flags_ungrounded_values():
     # an invented HRV of 45 with nothing grounded -> flagged
     assert fabricated_numbers("Your HRV was 45 ms.", allowed=[]) == ["45"]

@@ -93,13 +93,50 @@ _ABSENCE_PATTERNS = (
     "no logged",
 )
 
+# The substring list above enumerates NOUN phrases, and that is why it has now
+# failed correct answers twice (see 8ecaa52 for the first). "You had no training
+# sessions logged" is a perfect absence admission and matched nothing in it.
+#
+# The durable signal is the PREDICATE — the state being denied (logged, recorded,
+# set, available) — which generalizes across every metric. A small noun list is
+# still needed for the verbless form ("there is no active plan"), and those nouns
+# are this app's own stable vocabulary rather than open-ended English.
+_ABSENCE_STATE = (
+    r"(?:logged|recorded|set|available|found|tracked|entered|measured"
+    r"|data|records?|entries|entry)"
+)
+_ABSENCE_NOUN = (
+    r"(?:plan|workouts?|sessions?|weigh-?ins?|meals?|sleep|recovery"
+    r"|notes?|intake|training|food)"
+)
+_ABSENCE_RE = re.compile(
+    # "no training sessions logged", "no active plan", "no workouts recorded"
+    rf"\bno\s+(?:\S+\s+){{0,3}}(?:{_ABSENCE_STATE}|{_ABSENCE_NOUN})\b"
+    # "nothing has been logged", "nothing recorded"
+    rf"|\bnothing\s+(?:\S+\s+){{0,3}}{_ABSENCE_STATE}\b"
+    # "not yet recorded", "not available"
+    rf"|\bnot\s+(?:\S+\s+){{0,3}}{_ABSENCE_STATE}\b"
+    # "wasn't logged", "didn't get recorded"
+    rf"|n't\s+(?:\S+\s+){{0,3}}{_ABSENCE_STATE}\b"
+    # "no record of", "no sign of any"
+    rf"|\bno\s+(?:record|sign|trace)\s+of\b",
+    re.IGNORECASE,
+)
+
 _NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 def admits_absence(text: str) -> bool:
-    """True if the answer honestly signals missing data."""
+    """True if the answer honestly signals missing data.
+
+    Deliberately lenient. This gates absence scenarios only, and invention and
+    omission are scored separately (:func:`fabricated_numbers`,
+    :func:`omitted_numbers`) — so the cost of accepting a vague-but-honest
+    phrasing is small, while the cost of rejecting a correct one is a false FAIL
+    that makes the whole eval untrustworthy.
+    """
     low = text.lower()
-    return any(p in low for p in _ABSENCE_PATTERNS)
+    return any(p in low for p in _ABSENCE_PATTERNS) or bool(_ABSENCE_RE.search(low))
 
 
 _MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december"
