@@ -5,10 +5,12 @@
 
 ---
 
-## Where the code stands (verified 2026-07-26)
+## Where the code stands (verified 2026-07-29)
 
-- **439 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
-  PRs #12–#19 merged; #20 (web UI) and #21 (MFP training + watermark) open.
+- **542 tests green; ruff + mypy clean. Schema at v12** (migrations 0001–0012).
+  PRs #12–#24 merged; #25 open (grounding eval).
+- **Zero-fabrication eval at 50 scenarios covering all 9 tools — 50/50 passing
+  live on Grok.** Zero fabrications found.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
   daily calorie goal + timeline + adherence; and there is now a **local web
@@ -62,6 +64,79 @@ computes it (§2.2), clamped by the guardrails (§8.6).
   calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
   (ADR-0005) — by design, fills in with a few more days.
 - +26 plan tests. **328 tests green; ruff + mypy clean.**
+
+---
+
+## Session 2026-07-29 (b) — grounding eval 10 → 50 scenarios
+
+The P10 "expand the zero-fabrication eval toward ~50 queries" item (also the
+Notion validation bucket's "~50 coaching queries"). The eval was two-sided but
+thin: 10 scenarios touching 4 of the 9 tools, so five tool surfaces had **no
+fabrication guard at all**.
+
+- **50 scenarios**, covering **all 9 tools** — a test now asserts that coverage
+  (`test_scenario_set_covers_every_tool`), so adding a tool without a scenario
+  fails the suite rather than quietly leaving a gap.
+- 15 new seed helpers. Grouped: absence-per-tool (8), present-data-must-be-
+  reported (12), partial-data traps (10), computed layers — TDEE/plan/safety (10).
+- **New traps worth naming:** an *intentional fast* is logged, not missing (the
+  mirror of not-logged-isn't-zero, and the eval had no case for it); HRV present
+  while the composite score is NULL (§5's objective-vs-composite split made
+  adversarial); a nap-only day has no night sleep; `strain` absent on a
+  hand-logged MFP session (ADR-0015); a §8.6 alert that must be surfaced, AND a
+  safe series where inventing a warning is the failure.
+- **Deliberate rule on expected values:** stored numbers are asserted exactly in
+  `must_state_numbers`; **computed** ones (EWMA trend, TDEE, calorie goal) are
+  not — hand-writing an expected EWMA into a test literal would be the eval
+  doing the arithmetic §2.2 forbids. Those scenarios stay two-sided via
+  `must_admit_absence=False` plus a substrate check that a real value is served.
+  Session duration is likewise not demanded: the tool serves seconds and "97
+  minutes" is a unit conversion, not a fabrication.
+- **Cost (§8.7):** a full run is now 50 live agent loops, 5× before. Added
+  `select_scenarios()` + `coach eval grounding --only <substr> --limit N` so one
+  failing scenario can be debugged without paying for 50, and the runner prints
+  the run size before spending it.
+- **Fixed a real reporting gap:** the CLI never printed `omitted_numbers` on
+  FAIL. Omission became a failure mode when the eval went two-sided (2026-07-27)
+  and has been scored-but-invisible since — a stonewalling failure would have
+  shown `fabricated=[]` and looked inexplicable.
+- +85 tests. **524 green**; ruff (check + format) + mypy clean.
+
+### Live run: 38/50 → **50/50**, and 11 of the 12 failures were the SCORER's
+
+Ran live on Grok (~$0.12 for 50 scenarios). First run: **38/50**. Every failure
+was worth reading, and almost none were the model's:
+
+- **Thousands separators.** "you logged 1,800 calories" tokenized as `1` and
+  `800` — the same correct sentence scored as an invented 800 AND an omitted
+  1800.
+- **Unit conversion** (4 scenarios). Tools serve 5820 seconds / 460 minutes; the
+  model said "97 minutes (1 hour 37 minutes)". A code comment already asserted a
+  unit conversion "is not a fabrication" — the scorer had never been taught it.
+- **Sign.** `kg_changed_so_far` is `-0.605`; the model wrote "down 0.605 kg".
+- **Absence phrasing, again** (3 scenarios). "You didn't log any training
+  sessions" (bare `log`, not `logged`) and "there is no visible upward or
+  downward direction yet".
+
+`expand_units()` fixes the middle two and is **bounded on purpose**: sign, plus
+s→min→h decomposition of each value *on its own*. It never combines two values,
+so open arithmetic between different measurements is still caught — pinned by a
+test (an invented 45 against an allowed 5820 still fails).
+
+**The twelfth failure was mine.** `fast_has_no_calorie_figure` demanded the coach
+admit absence for a declared fast because the kcal column is NULL. That misreads
+§2.7 — the fast row exists to record "ate nothing *deliberately*", as distinct
+from a day with no rows. A declared fast **is** known-zero intake, so the model
+answering "known zero intake (0 calories)" had the domain right and my assertion
+was wrong. Renamed `fast_is_known_zero_not_missing` and inverted.
+
+**Second live run: 50/50.** Every failing answer is kept verbatim as a
+regression fixture — observed output, not invented examples — and the same
+scenario now carries two phrasings, because the model is not deterministic.
+
+⚠️ **50/50 is not permanent.** A rerun can surface a phrasing the scorer hasn't
+seen; that is reconciliation, not regression. The durable claim is narrower: no
+*fabrication* was found in 50 scenarios across 9 tools.
 
 ---
 

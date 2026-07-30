@@ -7,9 +7,19 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ---
 
-## ▶ NEXT UP (start here — updated 2026-07-26)
+## ▶ NEXT UP (start here — updated 2026-07-29)
 
-State: **415 tests green · ruff + mypy clean · schema v11 · PRs #12–#19 merged; #20, #21 open.**
+State: **524 tests green · ruff + mypy clean · schema v12 · PRs #12–#24 merged.**
+
+Done 2026-07-29: plan-set service seam (#24); **zero-fabrication eval 10 → 50
+scenarios, all 9 tools covered** + `eval grounding --only/--limit` for cost
+control (§8.7). The eval's **live** model pass is a human step (burns tokens) —
+`coach eval grounding --limit 5` first, then the full set.
+
+Remaining near-term, in priority order: **BLE spike** (🧑 hardware), **D6**
+(🧑 may the model author coaching notes?), **model routing + prompt-cache/COGS
+audit** (§8.7 — measure before optimizing, §11).
+
 Phases 0–7.5 done. The coach answers grounded questions live, *steers* (cut/bulk
 plan → daily calorie goal + adherence), and now has a **local web dashboard**
 (`coach web`, ADR-0014). Evals pass. Running daily on real data.
