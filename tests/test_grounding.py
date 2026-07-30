@@ -53,6 +53,122 @@ _SUBSTRATE = {
     "training_absent": lambda o: o["training"]["sessions"] == 0,
     # one weigh-in is not a trend: a single point can't establish direction
     "weight_trend_from_a_single_point": lambda o: len(o["series"]) <= 1,
+    # ---- absence, one per tool --------------------------------------------
+    "recovery_history_absent": lambda o: o["series"] == [] and o["insufficient"] is not None,
+    "sleep_history_absent": lambda o: o["series"] == [] and o["insufficient"] is not None,
+    "safety_flags_absent_no_trend": lambda o: o["alerts"] == [] and o["insufficient"] is not None,
+    "training_sessions_absent": lambda o: o["count"] == 0 and o["sessions"] == [],
+    "coach_notes_absent": lambda o: o["count"] == 0 and o["notes"] == [],
+    "weight_absent_entirely": lambda o: (
+        o["series"] == [] and o["latest_trend_kg"] is None and o["insufficient"] is not None
+    ),
+    "tdee_absent_entirely": lambda o: o["estimate"] is None and o["insufficient"] is not None,
+    "daily_status_everything_absent": lambda o: (
+        o["recovery"] is None
+        and o["weight"] is None
+        and o["sleep"] is None
+        and o["food"]["logged"] is False
+    ),
+    # ---- present data really is served ------------------------------------
+    "recovery_history_present_week": lambda o: (
+        len(o["series"]) == 7
+        and o["series"][-1]["score"] == 66.0
+        and o["series"][-1]["hrv_rmssd_ms"] == 61.0
+    ),
+    "resting_hr_present": lambda o: (
+        o["recovery"] is not None and o["recovery"]["resting_hr_bpm"] == 52.0
+    ),
+    "sleep_stages_present": lambda o: (
+        o["sleep"] is not None and o["sleep"]["sws_min"] == 95.0 and o["sleep"]["rem_min"] == 80.0
+    ),
+    "sleep_history_present_week": lambda o: (
+        len(o["series"]) == 5 and o["series"][-1]["in_bed_min"] == 460.0
+    ),
+    "training_calories_present": lambda o: (
+        o["count"] == 1 and o["sessions"][0]["kcal_active"] == 398.0
+    ),
+    "training_sport_named": lambda o: (
+        o["count"] == 1 and o["sessions"][0]["sport_type"] == "strength_training"
+    ),
+    "food_complete_macros_present": lambda o: (
+        o["food"]["kcal"] == 2150.0
+        and o["food"]["protein_g"] == 165.0
+        and o["food"]["carbs_g"] == 210.0
+        and o["food"]["fat_g"] == 70.0
+    ),
+    "food_kcal_present_specific": lambda o: o["food"]["kcal"] == 2150.0,
+    "weight_specific_day_present": lambda o: (
+        o["series"] and abs(o["series"][-1]["weight_kg"] - 84.71) < 1e-6
+    ),
+    "coach_notes_present": lambda o: o["count"] == 2,
+    # the OKOK scale outranks the MFP-mirrored row for the same day (ADR-0008)
+    "multi_source_weight_provenance": lambda o: (
+        o["series"] and o["series"][-1]["source_app"] == "okok"
+    ),
+    "weight_two_points_present": lambda o: len(o["series"]) == 2,
+    # ---- the traps ---------------------------------------------------------
+    "intentional_fast_is_logged": lambda o: (
+        o["food"]["logged"] is True and o["food"]["is_fast"] is True
+    ),
+    "fast_has_no_calorie_figure": lambda o: (
+        o["food"]["is_fast"] is True and o["food"]["kcal"] is None
+    ),
+    "recovery_hrv_present_score_absent": lambda o: (
+        o["recovery"] is not None
+        and o["recovery"]["hrv_rmssd_ms"] == 48.0
+        and o["recovery"]["score"] is None
+    ),
+    # the resolver excludes naps, so a nap-only day has no night sleep at all
+    "nap_only_no_night_sleep": lambda o: o["series"] == [] and o["insufficient"] is not None,
+    "carbs_and_fat_absent": lambda o: (
+        o["food"]["kcal"] == 1800.0 and o["food"]["carbs_g"] is None and o["food"]["fat_g"] is None
+    ),
+    # strain is WHOOP-only: a hand-logged session has none (ADR-0015)
+    "strain_absent_without_whoop": lambda o: (
+        o["training"]["sessions"] == 1 and o["training"]["strain"] is None
+    ),
+    "training_present_but_strain_is_not": lambda o: (
+        o["sessions"][0]["kcal_active"] == 398.0 and o["sessions"][0]["strain"] is None
+    ),
+    "recovery_window_partly_covered": lambda o: (
+        len(o["series"]) == 7 and o["series"][-1]["score"] == 66.0
+    ),
+    "sleep_efficiency_absent": lambda o: (
+        o["sleep"] is not None and o["sleep"]["efficiency_pct"] is None
+    ),
+    # notes exist, but they carry no measurement — the weight is nowhere in them
+    "notes_are_memory_not_measurement": lambda o: (
+        o["count"] == 2 and all("weigh" not in n["text"].lower() for n in o["notes"])
+    ),
+    # ---- computed layers ---------------------------------------------------
+    "tdee_present_must_be_reported": lambda o: (
+        o["estimate"] is not None and o["insufficient"] is None
+    ),
+    "plan_calorie_goal_present": lambda o: (
+        o["status"] is not None and o["status"]["calorie_goal_kcal"] is not None
+    ),
+    "plan_adherence_present": lambda o: (
+        o["status"] is not None and o["status"]["adherence"] is not None
+    ),
+    "plan_goal_weight_present": lambda o: (
+        o["plan"] is not None and o["plan"]["goal_weight_kg"] == 80.0
+    ),
+    "plan_timeline_present": lambda o: (
+        o["status"] is not None and o["status"]["projected_goal_day"] is not None
+    ),
+    # §8.6 fired: there is a real alert to surface verbatim
+    "safety_alert_must_be_surfaced": lambda o: len(o["alerts"]) >= 1,
+    # nothing tripped AND the data was sufficient to judge — no alarm to invent
+    "safety_no_alert_must_not_be_invented": lambda o: (
+        o["alerts"] == [] and o["insufficient"] is None
+    ),
+    "safety_single_point_insufficient": lambda o: o["insufficient"] is not None,
+    "tdee_partial_intake_insufficient": lambda o: (
+        o["estimate"] is None and o["insufficient"]["have"] == 5
+    ),
+    "intake_and_weight_both_present": lambda o: (
+        o["food"]["kcal"] == 2200.0 and o["weight"] is not None
+    ),
 }
 _HONEST_ABSENCE = _SUBSTRATE  # back-compat for existing assertions
 
@@ -138,6 +254,49 @@ def test_numbers_in_harvests_nested_tool_output():
     }
     got = sorted(numbers_in(payload))
     assert got == [0.0, 10.0, 14.0, 1370.5]
+
+
+# ---- scenario selection (cost control, §8.7) -------------------------------
+
+
+def test_scenario_set_covers_every_tool():
+    """A tool with no scenario is an unguarded fabrication surface."""
+    covered = {s.tool for s in SCENARIOS}
+    assert covered == {t.name for t in tools.TOOLS}
+
+
+def test_scenario_set_is_two_sided():
+    """Both failure modes must be represented, or the eval is gameable.
+
+    A set of only-absence cases is passed perfectly by a model that always says
+    "I don't have that"; a set of only-present cases never tests fabrication.
+    """
+    assert any(s.must_admit_absence for s in SCENARIOS)
+    assert any(s.must_state_numbers for s in SCENARIOS)
+    assert any(not s.must_admit_absence for s in SCENARIOS)
+
+
+def test_scenario_names_are_unique():
+    names = [s.name for s in SCENARIOS]
+    assert len(names) == len(set(names))
+
+
+def test_select_scenarios_narrows_by_name_and_limit():
+    from coach.coach.grounding import select_scenarios
+
+    assert select_scenarios() == SCENARIOS
+    plan_only = select_scenarios(only="plan")
+    assert plan_only and all("plan" in s.name for s in plan_only)
+    assert len(plan_only) < len(SCENARIOS)
+    assert len(select_scenarios(limit=3)) == 3
+    # a needle that matches nothing returns empty rather than silently running all
+    assert select_scenarios(only="no-such-scenario") == []
+
+
+def test_select_scenarios_is_case_insensitive():
+    from coach.coach.grounding import select_scenarios
+
+    assert select_scenarios(only="PLAN") == select_scenarios(only="plan")
 
 
 def test_insufficient_markers_quoted_back_are_grounded():

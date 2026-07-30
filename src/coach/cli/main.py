@@ -474,16 +474,24 @@ def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_eval_grounding(settings: Settings, _args: argparse.Namespace) -> int:
+def _cmd_eval_grounding(settings: Settings, args: argparse.Namespace) -> int:
     """Live faithfulness eval (T4.2). Burns tokens — run deliberately, never in CI."""
-    from ..coach.grounding import run_live_grounding
+    from ..coach.grounding import SCENARIOS, run_live_grounding, select_scenarios
 
     try:
         provider = _build_provider(settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
-    results = run_live_grounding(provider)
+    only = getattr(args, "only", None)
+    limit = getattr(args, "limit", None)
+    picked = select_scenarios(only=only, limit=limit)
+    if not picked:
+        print(f"No scenario name matches {only!r} — nothing to run.", file=sys.stderr)
+        return 2
+    # One live agent loop per scenario: say the size before spending it (§8.7).
+    print(f"Running {len(picked)}/{len(SCENARIOS)} grounding scenarios (one model run each)...")
+    results = run_live_grounding(provider, only=only, limit=limit)
     failed = 0
     for r in results:
         status = "PASS" if r["passed"] else "FAIL"
@@ -491,7 +499,8 @@ def _cmd_eval_grounding(settings: Settings, _args: argparse.Namespace) -> int:
         print(f"  [{status}] {r['scenario']}  tools={r['tool_calls']} rounds={r['rounds']}")
         if not r["passed"]:
             print(
-                f"         admits_absence={r['admits_absence']} fabricated={r['fabricated_numbers']}"
+                f"         admits_absence={r['admits_absence']} "
+                f"fabricated={r['fabricated_numbers']} omitted={r['omitted_numbers']}"
             )
             print(f"         answer: {r['answer'][:300]}")
     print(f"{len(results) - failed}/{len(results)} scenarios passed (target: zero fabrications)")
@@ -920,6 +929,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval = sub.add_parser("eval", help="model evaluation harnesses (burns tokens)")
     eval_sub = p_eval.add_subparsers(dest="eval_command", required=True)
     p_eg = eval_sub.add_parser("grounding", help="live zero-fabrication eval (T4.2)")
+    p_eg.add_argument(
+        "--only",
+        help="run only scenarios whose name contains this substring (cost control, §8.7)",
+    )
+    p_eg.add_argument(
+        "--limit", type=int, help="stop after this many scenarios (cost control, §8.7)"
+    )
     p_eg.set_defaults(func=_cmd_eval_grounding)
     p_eh = eval_sub.add_parser(
         "hrv", help="HRV-differentiator validation report (deterministic, no tokens)"

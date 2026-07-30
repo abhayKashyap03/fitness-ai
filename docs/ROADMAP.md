@@ -72,7 +72,9 @@ The post-membership path; the biggest open item. ADR-0012.
 - **[Done]** Coaching memory & consistency — ADR-0016, migration 0012; model reads, never writes.
 - **[Next Up]** Model routing + prompt-cache / COGS audit (§8.7).
 - **[Backlog]** MFP CSV backfill (Phase 6B — secondary; API path covers daily).
-- **[Next Up]** Expand the zero-fabrication eval set toward ~50 queries.
+- **[Done]** Zero-fabrication eval at **50 scenarios covering all 9 tools**
+  (two-sided; substrate verified offline). `eval grounding --only/--limit` keeps
+  a 50-scenario run affordable. _Live model pass remains a human step._
 
 ---
 
