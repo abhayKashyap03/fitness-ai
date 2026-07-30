@@ -102,7 +102,7 @@ _ABSENCE_PATTERNS = (
 # still needed for the verbless form ("there is no active plan"), and those nouns
 # are this app's own stable vocabulary rather than open-ended English.
 _ABSENCE_STATE = (
-    r"(?:logged|recorded|set|available|found|tracked|entered|measured"
+    r"(?:log(?:ged)?|record(?:ed)?|set|available|found|tracked|entered|measured"
     r"|data|records?|entries|entry)"
 )
 _ABSENCE_NOUN = (
@@ -119,9 +119,54 @@ _ABSENCE_RE = re.compile(
     # "wasn't logged", "didn't get recorded"
     rf"|n't\s+(?:\S+\s+){{0,3}}{_ABSENCE_STATE}\b"
     # "no record of", "no sign of any"
-    rf"|\bno\s+(?:record|sign|trace)\s+of\b",
+    rf"|\bno\s+(?:record|sign|trace)\s+of\b"
+    # "no visible upward or downward direction yet" — denying a TREND rather than
+    # a datum. Wider filler window than the general case is safe here: these
+    # nouns don't appear in the "no need to change anything" false positive.
+    rf"|\bno\s+(?:\S+\s+){{0,5}}(?:direction|trend|movement)\b",
     re.IGNORECASE,
 )
+
+# "1,800 calories" tokenizes as 1 and 800 without this, which scored a correct
+# answer as BOTH an invented 800 and an omitted 1800 — a double false failure
+# from pure formatting.
+_THOUSANDS_RE = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+
+
+def _strip_thousands(text: str) -> str:
+    """Join digit-grouping commas so ``1,800`` reads as one number."""
+    return _THOUSANDS_RE.sub("", text)
+
+
+def expand_units(allowed: list[float]) -> list[float]:
+    """Add the sign and unit-conversion forms of each allowed value.
+
+    The tool layer serves seconds and minutes. A faithful answer routinely says
+    "97 minutes" for 5820 seconds, or "7 hours 40 minutes" for 460 — and states
+    a loss of -0.605 kg as "down 0.605 kg". Those are **restatements of a served
+    number**, not invented measurements, and flagging them fails correct answers
+    (a coach forced to speak in raw seconds is a worse coach).
+
+    The expansion is deliberately bounded: sign, and s->min->h decomposition of
+    each value **on its own**. It never combines two values, so open arithmetic
+    between different measurements is still caught.
+    """
+    out: list[float] = []
+    for a in allowed:
+        out.extend((a, -a))
+        mag = abs(a)
+        if mag < 60:
+            continue
+        for unit in (60.0, 3600.0):  # a-as-minutes, a-as-seconds
+            if mag < unit:
+                continue
+            out.append(mag / unit)  # 5820s -> 1.6167h
+            out.append(float(int(mag // unit)))  # -> 1h
+            rem = mag % unit
+            out.append(float(int(rem)))  # -> 2220 (s remainder)
+            out.append(float(int(rem // 60)))  # -> 37 (min remainder)
+    return out
+
 
 _NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
@@ -163,10 +208,12 @@ def fabricated_numbers(text: str, allowed: list[float], *, tol: float = 0.5) -> 
     scrubbed = _PROSE_DATE_RE.sub(" ", text)
     scrubbed = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", " ", scrubbed)
     scrubbed = re.sub(r"\b(19|20)\d{2}\b", " ", scrubbed)
+    scrubbed = _strip_thousands(scrubbed)
+    permitted = expand_units(allowed)
     out: list[str] = []
     for tok in _NUMBER_RE.findall(scrubbed):
         val = float(tok)
-        if any(abs(val - a) <= tol for a in allowed):
+        if any(abs(val - a) <= tol for a in permitted):
             continue
         out.append(tok)
     return out
@@ -191,7 +238,7 @@ def numbers_in(obj: object) -> list[float]:
         for v in obj:
             out.extend(numbers_in(v))
     elif isinstance(obj, str):
-        for tok in _NUMBER_RE.findall(obj):
+        for tok in _NUMBER_RE.findall(_strip_thousands(obj)):
             out.append(float(tok))
     return out
 
@@ -790,12 +837,19 @@ SCENARIOS: list[GroundingScenario] = [
         must_admit_absence=False,  # a declared fast IS a log, not a gap (§2.7)
     ),
     GroundingScenario(
-        name="fast_has_no_calorie_figure",
+        name="fast_is_known_zero_not_missing",
         query="How many calories did I eat on 2026-05-01?",
         seed=_seed_intentional_fast,
         tool="get_daily_status",
+        # A declared fast is KNOWN ZERO intake, and answering "zero" is correct.
+        # This scenario originally asserted the opposite — that the coach must
+        # admit absence, on the reasoning that the kcal column is NULL. That was
+        # a misreading of §2.7: the fast row exists precisely to say "ate nothing
+        # deliberately", as distinct from a day with no rows at all. The live run
+        # failed a model answer that had the domain right. The assertion, not the
+        # answer, was wrong.
         tool_args={"date": "2026-05-01"},
-        must_admit_absence=True,  # fasting is recorded; a kcal number is not
+        must_admit_absence=False,
     ),
     GroundingScenario(
         name="recovery_hrv_present_score_absent",

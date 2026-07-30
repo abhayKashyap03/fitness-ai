@@ -110,8 +110,8 @@ _SUBSTRATE = {
     "intentional_fast_is_logged": lambda o: (
         o["food"]["logged"] is True and o["food"]["is_fast"] is True
     ),
-    "fast_has_no_calorie_figure": lambda o: (
-        o["food"]["is_fast"] is True and o["food"]["kcal"] is None
+    "fast_is_known_zero_not_missing": lambda o: (
+        o["food"]["is_fast"] is True and o["food"]["logged"] is True
     ),
     "recovery_hrv_present_score_absent": lambda o: (
         o["recovery"] is not None
@@ -197,6 +197,11 @@ LIVE_ABSENCE_ANSWERS = [
     "I have no record of any food for that date.",
     "Your sleep wasn't recorded that night.",
     "That metric is not available yet.",
+    # second live run, same scenarios, different phrasing — the model is not
+    # deterministic, so one accepted phrasing per case is not enough
+    "You didn't log any training sessions on 2026-05-01.",
+    "The 14-day window shows only a single data point, so there is no visible "
+    "upward or downward direction yet.",
 ]
 
 
@@ -357,6 +362,51 @@ def test_select_scenarios_is_case_insensitive():
     from coach.coach.grounding import select_scenarios
 
     assert select_scenarios(only="PLAN") == select_scenarios(only="plan")
+
+
+# ---- live-run reconciliation (2026-07-29, Grok) ----------------------------
+# A 50-scenario live run scored 38/50, and 11 of the 12 failures were the
+# SCORER's, not the model's. Each case below is the verbatim answer that failed,
+# kept as a regression fixture so the harness can't relapse into failing correct
+# work. Four distinct defects: thousands separators, unit conversion, sign, and
+# absence phrasing.
+
+
+def test_thousands_separator_is_not_two_numbers():
+    """'1,800' scored as an invented 800 AND an omitted 1800."""
+    from coach.coach.grounding import fabricated_numbers as fab
+    from coach.coach.grounding import omitted_numbers
+
+    answer = "On 2026-05-01, you logged **1,800 calories**. Protein was not logged."
+    assert fab(answer, allowed=[1800.0]) == []
+    assert omitted_numbers(answer, [1800.0]) == []
+
+
+def test_unit_conversion_of_a_served_number_is_not_fabrication():
+    """The tool serves seconds/minutes; a coach speaks hours and minutes."""
+    from coach.coach.grounding import fabricated_numbers as fab
+
+    # 460 minutes in bed, restated as 7h40m
+    assert fab("You were in bed for 460 minutes (about 7 hours and 40 minutes).", [460.0]) == []
+    # 5820 seconds, restated as 97 minutes / 1h37m
+    assert fab("Duration: 97 minutes (1 hour 37 minutes).", [5820.0]) == []
+
+
+def test_sign_restatement_is_not_fabrication():
+    """Tool serves -0.605 kg changed; 'down 0.605 kg' is the same fact."""
+    from coach.coach.grounding import fabricated_numbers as fab
+
+    assert fab("You're down 0.605 kg since the start.", [-0.605]) == []
+
+
+def test_unit_expansion_still_catches_real_invention():
+    """Leniency must stay bounded — no combining two served values."""
+    from coach.coach.grounding import fabricated_numbers as fab
+
+    # 45 is nowhere near 5820 or any of its unit forms
+    assert fab("Your HRV was 45 ms.", allowed=[5820.0]) == ["45"]
+    # a plausible-looking but ungrounded calorie figure is still caught
+    assert fab("You burned 1,250 kcal.", allowed=[398.0]) == ["1250"]
 
 
 def test_insufficient_markers_quoted_back_are_grounded():
