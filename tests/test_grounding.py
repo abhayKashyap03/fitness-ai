@@ -276,6 +276,34 @@ def test_scenario_set_is_two_sided():
     assert any(not s.must_admit_absence for s in SCENARIOS)
 
 
+def test_injected_today_sits_just_after_the_fixture_window():
+    """The anchor must not drift past the seeded data.
+
+    The agent resolves relative phrasing ("today", "the last two weeks")
+    against the injected today. An anchor beyond the fixture window points
+    every relative query at empty history, so a present-data scenario fails for
+    a reason that has nothing to do with faithfulness. This was a real bug: the
+    anchor sat two months past the data, latent while every relative-phrased
+    scenario happened to be an absence case.
+    """
+    from datetime import date, timedelta
+
+    from coach.coach.grounding import FIXTURE_LAST_DAY, FIXTURE_TODAY
+
+    last = date.fromisoformat(FIXTURE_LAST_DAY)
+    assert date.fromisoformat(FIXTURE_TODAY) == last + timedelta(days=1)
+
+
+def test_no_scenario_asks_about_a_day_after_today():
+    """A pinned tool arg past the anchor would query the agent's future."""
+    from coach.coach.grounding import FIXTURE_TODAY
+
+    for s in SCENARIOS:
+        for key in ("date", "end"):
+            if key in s.tool_args:
+                assert s.tool_args[key] <= FIXTURE_TODAY, f"{s.name}: {key} is after today"
+
+
 def test_scenario_names_are_unique():
     names = [s.name for s in SCENARIOS]
     assert len(names) == len(set(names))

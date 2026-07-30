@@ -49,6 +49,16 @@ SCOPE:
 """
 
 
+# Every scenario's fixture data ends on FIXTURE_LAST_DAY, and the agent is told
+# "today" is the morning after. These MUST stay adjacent: the model resolves
+# relative phrasing ("today", "the last two weeks") against the injected today,
+# so an anchor sitting past the seeded window silently points every relative
+# query at empty history — a present-data scenario then fails for a reason that
+# has nothing to do with faithfulness.
+FIXTURE_LAST_DAY = "2026-05-01"
+FIXTURE_TODAY = "2026-05-02"
+
+
 @dataclass(frozen=True)
 class GroundingScenario:
     """One fabrication-risk case: a seeded DB state + query + expectations."""
@@ -956,9 +966,9 @@ def run_live_grounding(
         try:
             _db.migrate(conn)
             sc.seed(conn)
-            # scenarios pin their day in the query; anchor "today" just after it
-            # so relative phrasing can never wander into empty history
-            res = ask(conn, provider, sc.query, today="2026-07-01")
+            # anchor "today" the morning after the seeded window, so relative
+            # phrasing ("today", "the last two weeks") lands ON the fixture data
+            res = ask(conn, provider, sc.query, today=FIXTURE_TODAY)
             # Ground the fabrication check in what the model was actually GIVEN:
             # replay each successful call (these tools are read-only, so the
             # output is identical) and harvest every number it returned.
@@ -968,7 +978,7 @@ def run_live_grounding(
                     continue
                 try:
                     allowed.extend(
-                        numbers_in(dispatch(conn, call.name, call.args, today="2026-07-01"))
+                        numbers_in(dispatch(conn, call.name, call.args, today=FIXTURE_TODAY))
                     )
                 except Exception:
                     continue  # scoring must never crash the eval
