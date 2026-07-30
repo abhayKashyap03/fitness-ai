@@ -42,6 +42,27 @@ class Settings:
     llm_provider: str = "google"  # 'google' (free tier) | 'anthropic' | 'grok'
     coach_model: str = ""  # empty -> provider default (see coach.coach.llm)
 
+    # USD per 1M tokens for the ACTIVE provider/model (§8.7). Deliberately not
+    # defaulted to a built-in price table: shipping guessed per-token prices
+    # would fabricate exactly the kind of number this project refuses to
+    # fabricate, and a wrong rate flows straight into a "you spent $X" claim.
+    # Unset -> calls are recorded with real token counts and reported UNPRICED,
+    # never as free (§2.7).
+    price_input_per_mtok: float | None = None
+    price_output_per_mtok: float | None = None
+    price_cached_input_per_mtok: float | None = None
+    price_cache_write_per_mtok: float | None = None
+
+    @property
+    def llm_prices(self) -> dict[str, float | None]:
+        """Rates to stamp on a recorded call (see store.llm_calls.record_call)."""
+        return {
+            "input": self.price_input_per_mtok,
+            "output": self.price_output_per_mtok,
+            "cached_input": self.price_cached_input_per_mtok,
+            "cache_write": self.price_cache_write_per_mtok,
+        }
+
     @property
     def llm_api_key(self) -> str:
         """The API key for the configured provider (never logged, §8.4)."""
@@ -114,6 +135,24 @@ def _get(env: dict[str, str], name: str, *, required: bool, default: str | None 
     return ""
 
 
+def _get_price(env: dict[str, str], name: str) -> float | None:
+    """An optional USD-per-1M-token rate. Absent stays absent (§2.7).
+
+    A malformed rate is an error, not a silent fallback to None: reading
+    ``"12.oo"`` as unpriced would hide a typo behind a plausible-looking report.
+    """
+    raw = env.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a number (USD per 1M tokens), got {raw!r}.") from exc
+    if value < 0:
+        raise ConfigError(f"{name} must not be negative, got {value}.")
+    return value
+
+
 def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool = True) -> Settings:
     """Build :class:`Settings` from the environment.
 
@@ -148,8 +187,7 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
     provider = _get(env, "COACH_LLM_PROVIDER", required=False, default="google").lower()
     if provider not in {"google", "anthropic", "grok"}:
         raise ConfigError(
-            "COACH_LLM_PROVIDER must be 'google', 'anthropic', or 'grok', "
-            f"got {provider!r}."
+            f"COACH_LLM_PROVIDER must be 'google', 'anthropic', or 'grok', got {provider!r}."
         )
 
     return Settings(
@@ -173,4 +211,8 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
         llm_provider=provider,
         # empty -> the provider's own default model (coach.coach.llm)
         coach_model=_get(env, "COACH_MODEL", required=False),
+        price_input_per_mtok=_get_price(env, "COACH_PRICE_INPUT_PER_MTOK"),
+        price_output_per_mtok=_get_price(env, "COACH_PRICE_OUTPUT_PER_MTOK"),
+        price_cached_input_per_mtok=_get_price(env, "COACH_PRICE_CACHED_INPUT_PER_MTOK"),
+        price_cache_write_per_mtok=_get_price(env, "COACH_PRICE_CACHE_WRITE_PER_MTOK"),
     )

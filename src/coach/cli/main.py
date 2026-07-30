@@ -471,7 +471,36 @@ def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
         f"in={u.input_tokens} out={u.output_tokens} cached={u.cached_input_tokens}]",
         file=sys.stderr,
     )
+    _record_spend(settings, provider, result, command="ask")
     return 0
+
+
+def _record_spend(settings: Settings, provider: object, result: object, *, command: str) -> None:
+    """Persist this call's spend (§8.7). Never fails the user's command.
+
+    Accounting is a side effect of doing the work, not the work itself: if the
+    ledger write breaks, the answer the user already received still stands. The
+    failure is reported on stderr rather than swallowed, so a silently broken
+    ledger can't masquerade as a zero-cost month.
+    """
+    from ..services.llm_usage import record_agent_result
+
+    try:
+        conn = db.connect(settings.db_path)
+        try:
+            record_agent_result(
+                conn,
+                provider,
+                result,
+                command=command,
+                prices=settings.llm_prices,
+                home_tz=settings.home_tz,
+                user_id=settings.user_id,
+            )
+        finally:
+            conn.close()
+    except Exception as exc:  # accounting must never break the coach
+        print(f"[warning] could not record token usage: {exc}", file=sys.stderr)
 
 
 def _cmd_eval_grounding(settings: Settings, args: argparse.Namespace) -> int:
@@ -504,7 +533,90 @@ def _cmd_eval_grounding(settings: Settings, args: argparse.Namespace) -> int:
             )
             print(f"         answer: {r['answer'][:300]}")
     print(f"{len(results) - failed}/{len(results)} scenarios passed (target: zero fabrications)")
+
+    # One agent loop per scenario, so this is the project's largest single spend.
+    # Recorded as ONE row for the whole run: the unit of spend a human decides
+    # about is "should I run the eval", not "should I run scenario 34".
+    from ..coach.llm.base import Usage
+
+    total = Usage()
+    for r in results:
+        total = total + r.get("usage", Usage())
+    print(
+        f"[tokens: in={total.input_tokens} out={total.output_tokens} "
+        f"cached={total.cached_input_tokens}]",
+        file=sys.stderr,
+    )
+    _record_spend(
+        settings,
+        provider,
+        type("_R", (), {"usage": total, "rounds": sum(r["rounds"] for r in results)})(),
+        command="eval_grounding",
+    )
     return 0 if failed == 0 else 1
+
+
+def _fmt_usd(usd: float | None) -> str:
+    """Money, or an explicit UNPRICED — never 0.00 for "we don't know" (§2.7)."""
+    return f"${usd:.4f}" if usd is not None else "UNPRICED"
+
+
+def _cmd_cost(settings: Settings, args: argparse.Namespace) -> int:
+    """Report recorded LLM spend (§8.7). Reads the ledger; makes no API call."""
+    from datetime import date, timedelta
+
+    from ..compute.cost import cost_summary
+    from ..compute.trends import Insufficient
+    from ..store.llm_calls import calls_in_window
+
+    end = args.end or _today(settings)
+    start = (date.fromisoformat(end) - timedelta(days=args.window - 1)).isoformat()
+
+    conn = db.connect(settings.db_path)
+    try:
+        rows = calls_in_window(conn, start=start, end=end, user_id=settings.user_id)
+    finally:
+        conn.close()
+
+    summary = cost_summary(rows, start=start, end=end)
+    if args.json:
+        import json
+        from dataclasses import asdict
+
+        if isinstance(summary, Insufficient):
+            print(json.dumps({"insufficient": {"have": summary.have, "needed": summary.needed}}))
+        else:
+            print(json.dumps(asdict(summary), indent=2))
+        return 0
+
+    print(f"── LLM spend {start} → {end} ──")
+    if isinstance(summary, Insufficient):
+        # Not "$0.00 spent" — nothing has been recorded, which is a different fact.
+        print("  no calls recorded in this window")
+        print("  (spend is recorded from the first `coach ask` after migration 0013)")
+        return 0
+
+    t = summary.tokens
+    print(f"  calls:      {summary.calls}  ({summary.failed_calls} failed)")
+    print(
+        f"  tokens:     in={t.input_tokens}  out={t.output_tokens}  cached={t.cached_input_tokens}"
+    )
+    if t.cache_write_tokens:
+        print(f"              cache_write={t.cache_write_tokens}")
+    hit = summary.cache_hit_pct
+    print(f"  cache hit:  {f'{hit:.1f}%' if hit is not None else 'n/a (no input tokens)'}")
+    print(f"  cost:       {_fmt_usd(summary.usd)}")
+    if summary.unpriced_calls:
+        print(
+            f"              {summary.unpriced_calls} of {summary.calls} call(s) unpriced "
+            "— set COACH_PRICE_*_PER_MTOK in .env to price them"
+        )
+    print("  by command:")
+    for c in summary.by_command:
+        print(
+            f"    {c.command:<16} {c.calls:>4} call(s)  {c.tokens.total:>9} tok  {_fmt_usd(c.usd)}"
+        )
+    return 0
 
 
 def _fmt_corr(c: object) -> str:
@@ -943,6 +1055,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_eh.add_argument("--end", default=None, help="end day_key (default: today in COACH_HOME_TZ)")
     p_eh.add_argument("--window", type=int, default=90, help="lookback window in days (default 90)")
     p_eh.set_defaults(func=_cmd_eval_hrv)
+
+    p_cost = sub.add_parser("cost", help="recorded LLM token spend (§8.7; no API call)")
+    p_cost.add_argument("--window", type=int, default=30, help="days ending --end (default 30)")
+    p_cost.add_argument("--end", help="last day_key (default: today in COACH_HOME_TZ)")
+    p_cost.add_argument("--json", action="store_true", help="machine-readable output")
+    p_cost.set_defaults(func=_cmd_cost)
 
     p_doctor = sub.add_parser("doctor", help="config/db/token/data sanity report")
     p_doctor.set_defaults(func=_cmd_doctor)

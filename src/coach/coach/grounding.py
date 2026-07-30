@@ -1092,6 +1092,10 @@ def run_live_grounding(
                 "tool_calls": [c.name for c in res.tool_calls],
                 "rounds": res.rounds,
                 "answer": res.text,
+                # The eval is the single biggest spender in the project (one
+                # agent loop per scenario) and used to report no usage at all,
+                # so its cost was invisible to the §8.7 accounting.
+                "usage": res.usage,
             }
         )
     return results

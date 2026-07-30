@@ -5,12 +5,57 @@
 
 ---
 
-## Where the code stands (verified 2026-07-29)
+## Session 2026-07-30 — LLM cost measurement (§8.7), migration 0013
 
-- **542 tests green; ruff + mypy clean. Schema at v12** (migrations 0001–0012).
-  PRs #12–#24 merged; #25 open (grounding eval).
+The P10 "model routing + prompt-cache / COGS audit" item — but only the
+**measurement** half, because §11 forbids optimizing before a measured problem
+exists. There was nothing to optimize *against*: `coach ask` printed a token
+count to stderr and discarded it, and the eval (50 agent loops, the biggest
+single spend) reported no usage at all.
+
+- **Migration 0013 `llm_call`** — append-only, code-authored primary data like
+  `plan`/`coach_note`; no `raw_ref`, excluded from the rebuild fingerprint by
+  construction (a test asserts asking a question can't make `--rebuild` look
+  non-reproducible).
+- **Rates are stored ON the row.** Prices change; recomputing an old call against
+  a current price table would silently rewrite history, so a July call keeps
+  July's rates forever (§2.3).
+- **No built-in price table, deliberately.** Shipping guessed per-token prices
+  would fabricate exactly the kind of number this project refuses to fabricate,
+  and a wrong rate flows straight into a "you spent $X" claim. Rates come from
+  `COACH_PRICE_*_PER_MTOK`; absent, a call is recorded with real tokens and
+  reported **UNPRICED — never free** (§2.7). An empty window returns
+  `Insufficient`, not "$0.00 spent".
+- **`compute/cost.py`** (pure) — per-call cost, token totals, cache-hit rate,
+  per-command split. A partly-priced window discloses the gap instead of
+  presenting its priced half as the total.
+- **One recording seam** (`services/llm_usage.py`) used by CLI, web chat and
+  eval — written that way from the start because `plan set`'s duplicated logic
+  already caused a real drift bug (PR #24). A test asserts the wrapper and the
+  primitive record identically.
+- **`coach cost [--window N] [--end] [--json]`**; accounting failures warn on
+  stderr and never break the coach.
+- +46 tests. **572 green**; ruff + mypy clean.
+
+**Live-verified** on the real DB (backup taken first): migration applied v12→v13,
+`coach ask` recorded, `coach cost` read it back. First real measurement:
+**cache hit 47.1%** (1664 of 3530 input tokens served from cache on a single
+ask), ~3.6k tokens per question. Verified all three provider adapters normalize
+cached tokens the same way, so that rate is exact rather than assumed.
+
+**Still unpriced** — the rates are the human's to fill in from the provider's
+pricing page; I won't guess them.
+
+---
+
+## Where the code stands (verified 2026-07-30)
+
+- **572 tests green; ruff + mypy clean. Schema at v13** (migrations 0001–0013).
+  PRs #12–#25 merged.
 - **Zero-fabrication eval at 50 scenarios covering all 9 tools — 50/50 passing
   live on Grok.** Zero fabrications found.
+- **LLM spend is recorded and reportable** (`coach cost`); rates unset, so spend
+  reads UNPRICED until the human fills in `COACH_PRICE_*_PER_MTOK`.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
   daily calorie goal + timeline + adherence; and there is now a **local web
