@@ -7,10 +7,10 @@
 
 ## Where the code stands (verified 2026-07-29)
 
-- **524 tests green; ruff + mypy clean. Schema at v12** (migrations 0001–0012).
-  PRs #12–#24 merged.
-- **Zero-fabrication eval at 50 scenarios covering all 9 tools** (substrate
-  verified offline; live model run is a human step).
+- **542 tests green; ruff + mypy clean. Schema at v12** (migrations 0001–0012).
+  PRs #12–#24 merged; #25 open (grounding eval).
+- **Zero-fabrication eval at 50 scenarios covering all 9 tools — 50/50 passing
+  live on Grok.** Zero fabrications found.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
   daily calorie goal + timeline + adherence; and there is now a **local web
@@ -102,11 +102,41 @@ fabrication guard at all**.
   shown `fabricated=[]` and looked inexplicable.
 - +85 tests. **524 green**; ruff (check + format) + mypy clean.
 
-**Not run live.** This is substrate only — every predicate is verified against
-real tool output offline (§6.2), but the live model pass costs tokens and is the
-human's call: `coach eval grounding --limit 5` first to sanity-check phrasing,
-then the full 50. Expect some scenarios to need phrasing tweaks on first live
-contact; the substrate is what's proven here.
+### Live run: 38/50 → **50/50**, and 11 of the 12 failures were the SCORER's
+
+Ran live on Grok (~$0.12 for 50 scenarios). First run: **38/50**. Every failure
+was worth reading, and almost none were the model's:
+
+- **Thousands separators.** "you logged 1,800 calories" tokenized as `1` and
+  `800` — the same correct sentence scored as an invented 800 AND an omitted
+  1800.
+- **Unit conversion** (4 scenarios). Tools serve 5820 seconds / 460 minutes; the
+  model said "97 minutes (1 hour 37 minutes)". A code comment already asserted a
+  unit conversion "is not a fabrication" — the scorer had never been taught it.
+- **Sign.** `kg_changed_so_far` is `-0.605`; the model wrote "down 0.605 kg".
+- **Absence phrasing, again** (3 scenarios). "You didn't log any training
+  sessions" (bare `log`, not `logged`) and "there is no visible upward or
+  downward direction yet".
+
+`expand_units()` fixes the middle two and is **bounded on purpose**: sign, plus
+s→min→h decomposition of each value *on its own*. It never combines two values,
+so open arithmetic between different measurements is still caught — pinned by a
+test (an invented 45 against an allowed 5820 still fails).
+
+**The twelfth failure was mine.** `fast_has_no_calorie_figure` demanded the coach
+admit absence for a declared fast because the kcal column is NULL. That misreads
+§2.7 — the fast row exists to record "ate nothing *deliberately*", as distinct
+from a day with no rows. A declared fast **is** known-zero intake, so the model
+answering "known zero intake (0 calories)" had the domain right and my assertion
+was wrong. Renamed `fast_is_known_zero_not_missing` and inverted.
+
+**Second live run: 50/50.** Every failing answer is kept verbatim as a
+regression fixture — observed output, not invented examples — and the same
+scenario now carries two phrasings, because the model is not deterministic.
+
+⚠️ **50/50 is not permanent.** A rerun can surface a phrasing the scorer hasn't
+seen; that is reconciliation, not regression. The durable claim is narrower: no
+*fabrication* was found in 50 scenarios across 9 tools.
 
 ---
 
