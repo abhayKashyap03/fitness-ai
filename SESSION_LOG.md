@@ -7,7 +7,7 @@
 
 ## Where the code stands (verified 2026-07-26)
 
-- **429 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
+- **439 tests green; ruff + mypy clean. Schema at v11** (migrations 0001–0011).
   PRs #12–#19 merged; #20 (web UI) and #21 (MFP training + watermark) open.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
@@ -62,6 +62,38 @@ computes it (§2.2), clamped by the guardrails (§8.6).
   calorie goal reads `Insufficient` until TDEE has 10 logged-intake days
   (ADR-0005) — by design, fills in with a few more days.
 - +26 plan tests. **328 tests green; ruff + mypy clean.**
+
+---
+
+## Session 2026-07-29 — one plan-set seam (CLI and web had drifted)
+
+Opened the web dashboard and it showed a plan (-0.50%/week) that did not match
+what the CLI had last set. **The user had changed it themselves from the
+dashboard** — the ordinary use of a form that exists to be used.
+
+The mistake worth recording: I treated a human action as an anomaly and went
+hunting for a rogue writer, then "restored" the plan to my own last known value.
+That was not a restore; it overwrote a deliberate user change. **When the DB and
+my last known state disagree, the DB is authoritative — the user may simply have
+used the app.** Ask before reverting.
+
+The investigation did surface a REAL bug, independent of who clicked:
+
+- The CLI wrote a `system` coaching note on every plan change. **The web form
+  did not** — because the CLI handler and the web POST handler each carried
+  their own copy of the resolve/clamp/anchor/insert logic, and they had drifted.
+  A plan the user set in the browser was therefore invisible in their own
+  history, which is exactly what made it look mysterious.
+- Fix: `services/plan.py::set_active_plan()` — one seam both surfaces call,
+  mirroring `services/sync.py` / `services/clients.py`. Entry-style resolution,
+  the §8.6 clamp, the start anchor and the audit note now happen in exactly one
+  place. A test asserts a plan set via the web form is indistinguishable from one
+  set via the CLI, note included.
+- +10 tests. **439 green**; ruff + mypy clean.
+
+Plan restored to the user's own setting: **-0.50%/week, goal 75 kg, start
+2026-07-20** (1640 kcal/day, no floor clamp, currently AHEAD). `plan` is
+append-only so every intermediate row stays visible in history.
 
 ---
 
