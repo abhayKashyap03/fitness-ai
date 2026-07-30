@@ -69,6 +69,14 @@ class PlanStatus:
     actual_rate_kg_per_week: float | None
     adherence: str | None  # 'on_track' | 'ahead' | 'behind' | 'wrong_way' | None
     alerts: list[Alert]
+    # Protein target, present only when the plan carries a g/kg figure. There is
+    # no default: a recommended intake is a coaching opinion about a real body,
+    # and inventing one would put a number the user never chose in front of them
+    # as if the tool had measured it (§2.2/§2.7). Unset stays unset.
+    protein_target_g_per_day: float | None = None
+    protein_logged_g: float | None = None  # None = not logged, which is not zero
+    protein_gap_g: float | None = None  # signed: negative means short of target
+    protein_met: bool | None = None  # None when either side is unknown
 
 
 # Actual rate within this fraction of the target reads as on-track; beyond it,
@@ -144,6 +152,57 @@ def resolve_target_rate(rate_pct_per_week: float) -> TargetRate:
     )
 
 
+@dataclass(frozen=True)
+class ProteinTarget:
+    """A protein goal and how today measures against it."""
+
+    g_per_kg: float
+    target_g_per_day: float
+    logged_g: float | None  # None = not logged, which is not zero
+    gap_g: float | None  # signed; negative means short of target
+    met: bool | None  # None when intake is unknown
+
+
+def protein_status(
+    *,
+    protein_g_per_kg: float | None,
+    current_trend_kg: float | None,
+    logged_protein_g: float | None = None,
+) -> ProteinTarget | None:
+    """The protein target, or None when there isn't one to state.
+
+    Deliberately independent of TDEE. A protein target needs only a g/kg figure
+    and a body weight, so it must survive the (common, early) state where the
+    calorie goal is still `Insufficient` for want of ten logged-intake days —
+    otherwise the target a user explicitly set is invisible exactly when they
+    have just set it. Found by running it, not by reading it.
+
+    Scales off the **trend** weight, like every other steering number here: raw
+    daily weight is noise, and a target that moves 0.8 kg overnight is not a
+    target.
+
+    Returns None when no g/kg was set — a recommended protein intake is a
+    coaching opinion about a real body, and supplying a default would put a
+    number the user never chose in front of them as if it had been measured
+    (§2.2). Absence stays absence (§2.7).
+    """
+    if protein_g_per_kg is None or current_trend_kg is None:
+        return None
+    target = round(protein_g_per_kg * current_trend_kg, 1)
+    gap: float | None = None
+    met: bool | None = None
+    if logged_protein_g is not None:
+        gap = round(logged_protein_g - target, 1)
+        met = logged_protein_g >= target
+    return ProteinTarget(
+        g_per_kg=protein_g_per_kg,
+        target_g_per_day=target,
+        logged_g=logged_protein_g,
+        gap_g=gap,
+        met=met,
+    )
+
+
 def plan_status(
     *,
     direction: str,
@@ -154,6 +213,8 @@ def plan_status(
     end_day: str | None = None,
     start_day_key: str | None = None,
     start_weight_kg: float | None = None,
+    protein_g_per_kg: float | None = None,
+    logged_protein_g: float | None = None,
     kcal_per_kg: float = KCAL_PER_KG,
 ) -> PlanStatus | Insufficient:
     """Daily calorie goal, projection, and progress-so-far against measured state.
@@ -223,6 +284,12 @@ def plan_status(
             # forever no matter how faithfully it is followed.
             adherence = adherence_label(actual_rate_kg_per_week, effective_rate_kg_per_week)
 
+    prot = protein_status(
+        protein_g_per_kg=protein_g_per_kg,
+        current_trend_kg=current_trend_kg,
+        logged_protein_g=logged_protein_g,
+    )
+
     return PlanStatus(
         tdee_kcal=round(tdee_kcal, 1),
         current_trend_kg=round(current_trend_kg, 3),
@@ -244,4 +311,8 @@ def plan_status(
         ),
         adherence=adherence,
         alerts=alerts,
+        protein_target_g_per_day=prot.target_g_per_day if prot else None,
+        protein_logged_g=prot.logged_g if prot else None,
+        protein_gap_g=prot.gap_g if prot else None,
+        protein_met=prot.met if prot else None,
     )

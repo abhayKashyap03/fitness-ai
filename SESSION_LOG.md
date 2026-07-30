@@ -5,7 +5,46 @@
 
 ---
 
-## Where the code stands (verified 2026-07-29)
+## Session 2026-07-30 (b) — protein target: a setting that was stored and never read
+
+`plan set --protein` has written `protein_g_per_kg` to the plan row since Phase 7
+and **nothing ever consumed it** — the 0010 migration comment says "future use".
+A user could set a protein target and the tool would silently ignore it.
+
+Worth naming: the 2026-07-26 **placeholder sweep missed this**. That sweep looked
+for *fake output* (like the old `eval hrv` legend), and this produces no output at
+all — it accepts input and discards it. A different failure shape than the one
+being hunted.
+
+- **`protein_status()`** (pure, `compute/plan.py`) — target grams/day from g/kg ×
+  **trend** weight, the same choice every other steering number makes (raw daily
+  weight is noise; a target that moves 0.8 kg overnight is not a target).
+- **No default g/kg, deliberately.** A recommended protein intake is a coaching
+  opinion about a real body; supplying one would put a number the user never chose
+  in front of them as if it had been measured. Unset → no target (§2.7).
+- **Not-logged is not a missed target.** With no logged protein the target still
+  shows and adherence stays `None` — never "short" for a day the tool knows
+  nothing about.
+- **A bug I introduced and caught by running it:** my first version put protein
+  inside `PlanStatus`, which returns `Insufficient` when TDEE is missing — so the
+  target vanished for the ten logged-intake days it takes TDEE to appear, i.e.
+  exactly when a user has just set it. Now reported *alongside* status, because it
+  only needs the trend weight. One pure function, three surfaces (tool, CLI, web).
+- +10 tests. **551 green**; ruff + mypy clean.
+
+**Live-verified** on a throwaway DB (deliberately *not* the real one — g/kg is the
+user's call, not mine to pick): target renders with insufficient TDEE, reads
+`NOT LOGGED` with no food, and `147.5 g target / 120 g logged / −27.5 g / short`
+with food. Web plan page screenshotted showing the line below the insufficient
+daily goal.
+
+**Also re-ran `coach eval hrv`** (free): still **NOISE** — autocorr +0.199, best
+next-day r 0.133, 72 HRV days (unchanged, so no new recovery data in the window).
+Recovery→macro stays correctly gated.
+
+---
+
+## Where the code stands (verified 2026-07-30)
 
 - **542 tests green; ruff + mypy clean. Schema at v12** (migrations 0001–0012).
   PRs #12–#24 merged; #25 open (grounding eval).

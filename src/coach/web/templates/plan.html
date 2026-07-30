@@ -45,6 +45,23 @@
       <p class="note">Adaptive TDEE needs ~10 logged-intake days. Adherence still works
         (it only needs the weight trend).</p>
     {% endif %}
+
+    {# Protein sits OUTSIDE the `ps` block on purpose: it needs only a g/kg
+       figure and the trend weight, so it must stay visible while TDEE is
+       still insufficient. #}
+    {% if plan.protein %}
+      {% set pr = plan.protein %}
+      <div class="row"><span class="k">protein target</span>
+        <span class="v"><strong>{{ m.val(pr.target_g_per_day, ' g', 0) }}</strong>
+          ({{ pr.g_per_kg }} g/kg of trend weight)
+          {%- if pr.logged_g is none %}
+            — today <span class="muted">NOT LOGGED</span>
+          {%- else %}
+            — logged {{ m.val(pr.logged_g, ' g', 0) }}
+            ({{ m.signed(pr.gap_g, ' g', 0) }},
+            <strong>{{ 'met' if pr.met else 'short' }}</strong>)
+          {%- endif %}</span></div>
+    {% endif %}
   {% endif %}
 </div>
 

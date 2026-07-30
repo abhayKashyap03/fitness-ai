@@ -64,8 +64,14 @@ The post-membership path; the biggest open item. ADR-0012.
 - **[Next Up · P1]** Recovery-informed training-load auto-scale on low-recovery days.
 - **[Blocked · P1]** Recovery→macro adjustment — **guarded**: HRV is NOISE today; must beat weight+intake before shipping (risk #6). _Depends: HRV showing signal._
 - **[Next Up · P1]** Plan TDEE-backed daily goal live. _Depends: 10+ logged-intake days (data accrual, no code)._
-- **[Backlog]** Protein floor / macro targets in the plan.
+- **[Done]** Protein target in the plan — `protein_status()` scales g/kg off the
+  trend weight and reports target vs logged. It had been *stored and never read*
+  since Phase 7 (0010's "future use" comment). No default g/kg is supplied: a
+  recommended intake is a coaching opinion, not a measurement. Reported alongside
+  plan status so it survives an insufficient TDEE.
 - **[Backlog]** Re-run HRV validation as data grows (revisit the NOISE verdict).
+  _Re-run 2026-07-30: still NOISE (autocorr +0.199, best next-day r 0.133, 72 HRV
+  days — unchanged, no new recovery data in the window)._
 
 ## P10 — Personal hardening
 

@@ -70,6 +70,9 @@ def test_api_tdee_reports_insufficient_not_a_number(client):
 def test_api_plan_is_null_when_none_set(client):
     body = client.get(f"/api/plan?end={DAY}").json()
     assert body["plan"] is None and body["status"] is None
+    # protein is part of the contract even with no plan, so the iOS client (P13)
+    # can rely on the key existing rather than probing for it
+    assert body["protein"] is None
 
 
 def test_api_rejects_a_bad_window(client):
