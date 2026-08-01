@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass
 
 from ..compute.daily import daily_status, training_sessions
 from ..compute.guardrails import Alert, TrendPoint, weight_loss_rate_alert
-from ..compute.plan import plan_status
+from ..compute.plan import plan_status, protein_status
 from ..compute.tdee import build_window, estimate_tdee
 from ..compute.trends import Insufficient
 from ..store.notes import recent_notes
@@ -272,7 +272,7 @@ def get_plan_status(
     """
     plan = active_plan(conn, user_id=user_id)
     if plan is None:
-        return {"end": end, "plan": None, "status": None, "insufficient": None}
+        return {"end": end, "plan": None, "status": None, "protein": None, "insufficient": None}
 
     plan_dict = {
         "direction": plan.direction,
@@ -280,6 +280,7 @@ def get_plan_status(
         "goal_weight_kg": plan.goal_weight_kg,
         "start_day_key": plan.start_day_key,
         "start_weight_kg": plan.start_weight_kg,
+        "protein_g_per_kg": plan.protein_g_per_kg,
     }
 
     est = estimate_tdee(build_window(conn, end, window, user_id))
@@ -292,6 +293,16 @@ def get_plan_status(
     ).fetchone()
     current_trend = row["trend_kg"] if row else None
 
+    # The day's logged protein, so a plan that carries a g/kg figure can be
+    # judged against what was actually eaten. Read straight from the daily
+    # rollup: NULL here means not logged, which is not zero (§2.7), and the
+    # compute layer keeps that distinction rather than scoring a missed target.
+    food = conn.execute(
+        "SELECT protein_g_total FROM food_daily WHERE user_id = ? AND day_key = ?",
+        (user_id, end),
+    ).fetchone()
+    logged_protein = food["protein_g_total"] if food else None
+
     st = plan_status(
         direction=plan.direction,
         target_rate_pct_per_week=plan.target_rate_pct_per_week,
@@ -301,12 +312,36 @@ def get_plan_status(
         end_day=end,
         start_day_key=plan.start_day_key,
         start_weight_kg=plan.start_weight_kg,
+        protein_g_per_kg=plan.protein_g_per_kg,
+        logged_protein_g=logged_protein,
     )
+    # Protein needs only a g/kg figure and the trend weight, so it is reported
+    # ALONGSIDE status rather than inside it — a target the user just set must not
+    # be invisible for the ten days it takes TDEE to become measurable.
+    prot = protein_status(
+        protein_g_per_kg=plan.protein_g_per_kg,
+        current_trend_kg=current_trend,
+        logged_protein_g=logged_protein,
+    )
+    protein_dict = asdict(prot) if prot is not None else None
+
     if isinstance(st, Insufficient):
-        return {"end": end, "plan": plan_dict, "status": None, "insufficient": _insufficient(st)}
+        return {
+            "end": end,
+            "plan": plan_dict,
+            "status": None,
+            "protein": protein_dict,
+            "insufficient": _insufficient(st),
+        }
     # asdict recurses PlanStatus.alerts (Alert dataclasses) into the same dict
     # shape as _alert — no prose, structured only.
-    return {"end": end, "plan": plan_dict, "status": asdict(st), "insufficient": None}
+    return {
+        "end": end,
+        "plan": plan_dict,
+        "status": asdict(st),
+        "protein": protein_dict,
+        "insufficient": None,
+    }
 
 
 # ---- registry --------------------------------------------------------------

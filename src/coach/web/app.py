@@ -143,11 +143,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # Configuration problem, not a user error — say so plainly.
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+        from ..services.llm_usage import record_agent_result
+
         with _conn() as conn:
             try:
                 result = ask(conn, provider, question, user_id=cfg.user_id, today=_today(cfg))
             except ApiError as exc:
                 raise HTTPException(status_code=502, detail=f"LLM API error: {exc}") from exc
+            # Same ledger the CLI writes, via the same seam (§8.7). A browser
+            # question costs exactly as much as a terminal one, so spend that
+            # only counted from the CLI would understate the month.
+            record_agent_result(
+                conn,
+                provider,
+                result,
+                command="web_ask",
+                prices=cfg.llm_prices,
+                home_tz=cfg.home_tz,
+                user_id=cfg.user_id,
+            )
 
         return {
             "answer": result.text,

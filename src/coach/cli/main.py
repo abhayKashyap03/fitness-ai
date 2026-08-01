@@ -471,7 +471,36 @@ def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
         f"in={u.input_tokens} out={u.output_tokens} cached={u.cached_input_tokens}]",
         file=sys.stderr,
     )
+    _record_spend(settings, provider, result, command="ask")
     return 0
+
+
+def _record_spend(settings: Settings, provider: object, result: object, *, command: str) -> None:
+    """Persist this call's spend (§8.7). Never fails the user's command.
+
+    Accounting is a side effect of doing the work, not the work itself: if the
+    ledger write breaks, the answer the user already received still stands. The
+    failure is reported on stderr rather than swallowed, so a silently broken
+    ledger can't masquerade as a zero-cost month.
+    """
+    from ..services.llm_usage import record_agent_result
+
+    try:
+        conn = db.connect(settings.db_path)
+        try:
+            record_agent_result(
+                conn,
+                provider,
+                result,
+                command=command,
+                prices=settings.llm_prices,
+                home_tz=settings.home_tz,
+                user_id=settings.user_id,
+            )
+        finally:
+            conn.close()
+    except Exception as exc:  # accounting must never break the coach
+        print(f"[warning] could not record token usage: {exc}", file=sys.stderr)
 
 
 def _cmd_eval_grounding(settings: Settings, args: argparse.Namespace) -> int:
@@ -504,6 +533,26 @@ def _cmd_eval_grounding(settings: Settings, args: argparse.Namespace) -> int:
             )
             print(f"         answer: {r['answer'][:300]}")
     print(f"{len(results) - failed}/{len(results)} scenarios passed (target: zero fabrications)")
+
+    # One agent loop per scenario, so this is the project's largest single spend.
+    # Recorded as ONE row for the whole run: the unit of spend a human decides
+    # about is "should I run the eval", not "should I run scenario 34".
+    from ..coach.llm.base import Usage
+
+    total = Usage()
+    for r in results:
+        total = total + r.get("usage", Usage())
+    print(
+        f"[tokens: in={total.input_tokens} out={total.output_tokens} "
+        f"cached={total.cached_input_tokens}]",
+        file=sys.stderr,
+    )
+    _record_spend(
+        settings,
+        provider,
+        type("_R", (), {"usage": total, "rounds": sum(r["rounds"] for r in results)})(),
+        command="eval_grounding",
+    )
     return 0 if failed == 0 else 1
 
 
@@ -765,6 +814,27 @@ def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_protein(p: dict) -> None:
+    """The plan's protein target line, if it has one.
+
+    Reads ``p["protein"]``, which the tool reports ALONGSIDE status rather than
+    inside it: a protein target needs only a g/kg figure and the trend weight, so
+    it must not vanish while TDEE is still insufficient.
+    """
+    prot = p.get("protein")
+    if prot is None:
+        return
+    line = f"  protein target:   {prot['target_g_per_day']:.0f} g/day"
+    line += f" ({prot['g_per_kg']:.2f} g/kg of trend weight)"
+    if prot["logged_g"] is None:
+        # Not logged is not a missed target — say which one it is (§2.7).
+        line += "  · today NOT LOGGED"
+    else:
+        mark = "met" if prot["met"] else "short"
+        line += f"  · logged {prot['logged_g']:.0f} g ({prot['gap_g']:+.0f} g, {mark})"
+    print(line)
+
+
 def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
     from ..coach.tools import get_plan_status
 
@@ -795,6 +865,10 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         print(
             f"  daily goal:       — (insufficient data: need {need['needed']}, have {need['have']})"
         )
+        # A protein target needs only the trend weight, so it survives here —
+        # otherwise a target the user just set is invisible for the ten days it
+        # takes TDEE to become measurable.
+        _print_protein(p)
         return 0
     st = p["status"]
     print(f"  measured TDEE:    {st['tdee_kcal']:.0f} kcal/day")
@@ -805,6 +879,7 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         f"(TDEE {st['effective_daily_kcal_delta']:+.0f})"
         + ("  [floor-clamped]" if st["floor_clamped"] else "")
     )
+    _print_protein(p)
     if st["weeks_to_goal"] is not None:
         print(f"  projection:       ~{st['weeks_to_goal']:.1f} weeks → {st['projected_goal_day']}")
     if st["adherence"] is not None:

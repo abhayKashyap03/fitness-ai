@@ -77,8 +77,23 @@ coach doctor                       # config/db/token sanity report
 coach eval hrv                     # is HRV signal or noise on YOUR data? (no tokens)
 coach eval calibration             # cross-source agreement: bias/MAE/correlation (no tokens)
 coach eval grounding               # live zero-fabrication eval (burns tokens)
+coach cost                         # recorded token spend + cache hit rate (no tokens)
 coach normalize --rebuild          # re-derive ALL canonical rows from raw
 ```
+
+`coach eval grounding` runs one model call per scenario (50 today), so scope it
+with `--only <substring>` or `--limit N` while iterating.
+
+### What it costs
+
+Every model call is recorded to `llm_call` and `coach cost` reports it: tokens,
+cache-hit rate, and a per-command split. Cost in currency is opt-in — set
+`COACH_PRICE_*_PER_MTOK` in `.env` from your provider's pricing page. Leave them
+empty and spend reads **UNPRICED** rather than free: the project doesn't ship
+guessed per-token prices, because a wrong rate becomes a wrong "you spent $X".
+Rates are stamped onto each call as it happens, so changing them later never
+rewrites what past calls cost
+([ADR-0017](docs/adr/0017-llm-cost-accounting.md)).
 
 An occasional Apple Health export ingests with
 `coach ingest healthkit --file export.zip` (or `coach sync --hk-file …`).
