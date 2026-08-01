@@ -46,10 +46,16 @@ Recovery→macro stays correctly gated.
 
 ## Where the code stands (verified 2026-07-30)
 
-- **542 tests green; ruff + mypy clean. Schema at v12** (migrations 0001–0012).
-  PRs #12–#24 merged; #25 open (grounding eval).
+---
+
+## Where the code stands (verified 2026-07-30)
+
+- **572 tests green; ruff + mypy clean. Schema at v13** (migrations 0001–0013).
+  PRs #12–#25 merged.
 - **Zero-fabrication eval at 50 scenarios covering all 9 tools — 50/50 passing
   live on Grok.** Zero fabrications found.
+- **LLM spend is recorded and reportable** (`coach cost`); rates unset, so spend
+  reads UNPRICED until the human fills in `COACH_PRICE_*_PER_MTOK`.
 - Phases 0–7.5 done, plus the source-ownership fix (ADR-0015). WHOOP + MFP (food+weight) run **live**; the coach (`coach
   ask`) answers grounded questions live; it **steers** — a cut/bulk plan sets a
   daily calorie goal + timeline + adherence; and there is now a **local web
