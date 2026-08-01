@@ -380,3 +380,119 @@ def test_clamped_adherence_is_judged_against_what_is_achievable():
     )
     assert not isinstance(st, Insufficient)
     assert st.adherence == "on_track"
+
+
+# ---- protein target (was stored but never read) -----------------------------
+#
+# `plan set --protein` wrote protein_g_per_kg to the plan row from the start, and
+# nothing ever consumed it — the 0010 migration comment said "future use". So a
+# user could set a protein target and the tool would silently ignore it. The
+# 2026-07-26 placeholder sweep missed this because it looked for FAKE OUTPUT, and
+# this produced no output at all.
+
+
+def _st(**kw):
+    base = dict(
+        direction="cut",
+        target_rate_pct_per_week=-0.5,
+        goal_weight_kg=75.0,
+        tdee_kcal=2400.0,
+        current_trend_kg=80.0,
+        end_day="2026-07-30",
+    )
+    base.update(kw)
+    st = plan_status(**base)
+    assert not isinstance(st, Insufficient)
+    return st
+
+
+def test_no_protein_figure_means_no_target():
+    """Absent stays absent — a recommended g/kg is a coaching opinion, not a
+    measurement, so the tool must not supply one the user never chose."""
+    st = _st()
+    assert st.protein_target_g_per_day is None
+    assert st.protein_gap_g is None
+    assert st.protein_met is None
+
+
+def test_protein_target_scales_off_the_trend_weight():
+    # 1.8 g/kg * 80.0 kg trend = 144.0 g/day
+    st = _st(protein_g_per_kg=1.8)
+    assert st.protein_target_g_per_day == pytest.approx(144.0)
+
+
+def test_protein_target_uses_trend_not_a_noisy_scale_reading():
+    """A target that jumps with daily scale noise is not a target."""
+    lean = _st(protein_g_per_kg=2.0, current_trend_kg=78.0)
+    heavier = _st(protein_g_per_kg=2.0, current_trend_kg=82.0)
+    assert lean.protein_target_g_per_day == pytest.approx(156.0)  # 2.0 * 78
+    assert heavier.protein_target_g_per_day == pytest.approx(164.0)  # 2.0 * 82
+
+
+def test_logged_protein_above_target_is_met():
+    # target 1.6 * 80 = 128 ; logged 150 -> +22 over
+    st = _st(protein_g_per_kg=1.6, logged_protein_g=150.0)
+    assert st.protein_target_g_per_day == pytest.approx(128.0)
+    assert st.protein_gap_g == pytest.approx(22.0)
+    assert st.protein_met is True
+
+
+def test_logged_protein_below_target_is_short():
+    # target 128 ; logged 100 -> -28 short
+    st = _st(protein_g_per_kg=1.6, logged_protein_g=100.0)
+    assert st.protein_gap_g == pytest.approx(-28.0)
+    assert st.protein_met is False
+
+
+def test_exactly_hitting_the_target_counts_as_met():
+    st = _st(protein_g_per_kg=1.6, logged_protein_g=128.0)
+    assert st.protein_gap_g == pytest.approx(0.0)
+    assert st.protein_met is True
+
+
+def test_unlogged_protein_is_not_a_missed_target():
+    """The load-bearing case: not logged != ate none (§2.7).
+
+    Scoring an unlogged day as 'short' would tell the user they missed a target
+    on a day the tool has no idea about.
+    """
+    st = _st(protein_g_per_kg=1.8, logged_protein_g=None)
+    assert st.protein_target_g_per_day == pytest.approx(144.0)  # target still known
+    assert st.protein_logged_g is None
+    assert st.protein_gap_g is None
+    assert st.protein_met is None  # NOT False
+
+
+def test_protein_does_not_disturb_the_calorie_goal():
+    """A macro target must not change the energy math it sits beside."""
+    without = _st()
+    with_protein = _st(protein_g_per_kg=2.0, logged_protein_g=120.0)
+    assert with_protein.calorie_goal_kcal == without.calorie_goal_kcal
+    assert with_protein.effective_rate_kg_per_week == without.effective_rate_kg_per_week
+    assert with_protein.alerts == without.alerts
+
+
+def test_protein_target_survives_the_tool_boundary(migrated_conn):
+    """End to end: a plan set with --protein must reach get_plan_status."""
+    from coach.coach.tools import get_plan_status
+
+    created = "2026-07-01T00:00:00+00:00"
+    insert_plan(
+        migrated_conn,
+        PlanRow(
+            id=plan_id(1, created),
+            user_id=1,
+            created_at=created,
+            start_day_key="2026-07-01",
+            direction="cut",
+            target_rate_pct_per_week=-0.5,
+            start_weight_kg=82.0,
+            goal_weight_kg=78.0,
+            protein_g_per_kg=1.8,
+        ),
+    )
+    migrated_conn.commit()
+    out = get_plan_status(migrated_conn, end="2026-07-30")
+    # the g/kg figure is exposed on the plan even when TDEE is insufficient,
+    # so the user can see what they set rather than wondering if it took
+    assert out["plan"]["protein_g_per_kg"] == 1.8

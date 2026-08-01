@@ -5,48 +5,46 @@
 
 ---
 
-## Session 2026-07-30 — LLM cost measurement (§8.7), migration 0013
+## Session 2026-07-30 (b) — protein target: a setting that was stored and never read
 
-The P10 "model routing + prompt-cache / COGS audit" item — but only the
-**measurement** half, because §11 forbids optimizing before a measured problem
-exists. There was nothing to optimize *against*: `coach ask` printed a token
-count to stderr and discarded it, and the eval (50 agent loops, the biggest
-single spend) reported no usage at all.
+`plan set --protein` has written `protein_g_per_kg` to the plan row since Phase 7
+and **nothing ever consumed it** — the 0010 migration comment says "future use".
+A user could set a protein target and the tool would silently ignore it.
 
-- **[ADR-0017](docs/adr/0017-llm-cost-accounting.md)** records the two load-bearing
-  calls (rates on the row; unpriced never free).
-- **Migration 0013 `llm_call`** — append-only, code-authored primary data like
-  `plan`/`coach_note`; no `raw_ref`, excluded from the rebuild fingerprint by
-  construction (a test asserts asking a question can't make `--rebuild` look
-  non-reproducible).
-- **Rates are stored ON the row.** Prices change; recomputing an old call against
-  a current price table would silently rewrite history, so a July call keeps
-  July's rates forever (§2.3).
-- **No built-in price table, deliberately.** Shipping guessed per-token prices
-  would fabricate exactly the kind of number this project refuses to fabricate,
-  and a wrong rate flows straight into a "you spent $X" claim. Rates come from
-  `COACH_PRICE_*_PER_MTOK`; absent, a call is recorded with real tokens and
-  reported **UNPRICED — never free** (§2.7). An empty window returns
-  `Insufficient`, not "$0.00 spent".
-- **`compute/cost.py`** (pure) — per-call cost, token totals, cache-hit rate,
-  per-command split. A partly-priced window discloses the gap instead of
-  presenting its priced half as the total.
-- **One recording seam** (`services/llm_usage.py`) used by CLI, web chat and
-  eval — written that way from the start because `plan set`'s duplicated logic
-  already caused a real drift bug (PR #24). A test asserts the wrapper and the
-  primitive record identically.
-- **`coach cost [--window N] [--end] [--json]`**; accounting failures warn on
-  stderr and never break the coach.
-- +46 tests. **572 green**; ruff + mypy clean.
+Worth naming: the 2026-07-26 **placeholder sweep missed this**. That sweep looked
+for *fake output* (like the old `eval hrv` legend), and this produces no output at
+all — it accepts input and discards it. A different failure shape than the one
+being hunted.
 
-**Live-verified** on the real DB (backup taken first): migration applied v12→v13,
-`coach ask` recorded, `coach cost` read it back. First real measurement:
-**cache hit 47.1%** (1664 of 3530 input tokens served from cache on a single
-ask), ~3.6k tokens per question. Verified all three provider adapters normalize
-cached tokens the same way, so that rate is exact rather than assumed.
+- **`protein_status()`** (pure, `compute/plan.py`) — target grams/day from g/kg ×
+  **trend** weight, the same choice every other steering number makes (raw daily
+  weight is noise; a target that moves 0.8 kg overnight is not a target).
+- **No default g/kg, deliberately.** A recommended protein intake is a coaching
+  opinion about a real body; supplying one would put a number the user never chose
+  in front of them as if it had been measured. Unset → no target (§2.7).
+- **Not-logged is not a missed target.** With no logged protein the target still
+  shows and adherence stays `None` — never "short" for a day the tool knows
+  nothing about.
+- **A bug I introduced and caught by running it:** my first version put protein
+  inside `PlanStatus`, which returns `Insufficient` when TDEE is missing — so the
+  target vanished for the ten logged-intake days it takes TDEE to appear, i.e.
+  exactly when a user has just set it. Now reported *alongside* status, because it
+  only needs the trend weight. One pure function, three surfaces (tool, CLI, web).
+- +10 tests. **551 green**; ruff + mypy clean.
 
-**Still unpriced** — the rates are the human's to fill in from the provider's
-pricing page; I won't guess them.
+**Live-verified** on a throwaway DB (deliberately *not* the real one — g/kg is the
+user's call, not mine to pick): target renders with insufficient TDEE, reads
+`NOT LOGGED` with no food, and `147.5 g target / 120 g logged / −27.5 g / short`
+with food. Web plan page screenshotted showing the line below the insufficient
+daily goal.
+
+**Also re-ran `coach eval hrv`** (free): still **NOISE** — autocorr +0.199, best
+next-day r 0.133, 72 HRV days (unchanged, so no new recovery data in the window).
+Recovery→macro stays correctly gated.
+
+---
+
+## Where the code stands (verified 2026-07-30)
 
 ---
 

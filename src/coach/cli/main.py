@@ -821,6 +821,27 @@ def _cmd_plan_set(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_protein(p: dict) -> None:
+    """The plan's protein target line, if it has one.
+
+    Reads ``p["protein"]``, which the tool reports ALONGSIDE status rather than
+    inside it: a protein target needs only a g/kg figure and the trend weight, so
+    it must not vanish while TDEE is still insufficient.
+    """
+    prot = p.get("protein")
+    if prot is None:
+        return
+    line = f"  protein target:   {prot['target_g_per_day']:.0f} g/day"
+    line += f" ({prot['g_per_kg']:.2f} g/kg of trend weight)"
+    if prot["logged_g"] is None:
+        # Not logged is not a missed target — say which one it is (§2.7).
+        line += "  · today NOT LOGGED"
+    else:
+        mark = "met" if prot["met"] else "short"
+        line += f"  · logged {prot['logged_g']:.0f} g ({prot['gap_g']:+.0f} g, {mark})"
+    print(line)
+
+
 def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
     from ..coach.tools import get_plan_status
 
@@ -851,6 +872,10 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         print(
             f"  daily goal:       — (insufficient data: need {need['needed']}, have {need['have']})"
         )
+        # A protein target needs only the trend weight, so it survives here —
+        # otherwise a target the user just set is invisible for the ten days it
+        # takes TDEE to become measurable.
+        _print_protein(p)
         return 0
     st = p["status"]
     print(f"  measured TDEE:    {st['tdee_kcal']:.0f} kcal/day")
@@ -861,6 +886,7 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         f"(TDEE {st['effective_daily_kcal_delta']:+.0f})"
         + ("  [floor-clamped]" if st["floor_clamped"] else "")
     )
+    _print_protein(p)
     if st["weeks_to_goal"] is not None:
         print(f"  projection:       ~{st['weeks_to_goal']:.1f} weeks → {st['projected_goal_day']}")
     if st["adherence"] is not None:
