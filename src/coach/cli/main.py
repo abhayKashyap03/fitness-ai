@@ -556,66 +556,59 @@ def _cmd_eval_grounding(settings: Settings, args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
-def _fmt_usd(usd: float | None) -> str:
-    """Money, or an explicit UNPRICED — never 0.00 for "we don't know" (§2.7)."""
-    return f"${usd:.4f}" if usd is not None else "UNPRICED"
-
-
-def _cmd_cost(settings: Settings, args: argparse.Namespace) -> int:
-    """Report recorded LLM spend (§8.7). Reads the ledger; makes no API call."""
-    from datetime import date, timedelta
-
-    from ..compute.cost import cost_summary
+def _fmt_agreement(name: str, got: object) -> str:
+    """One metric's agreement line, or an honest insufficient marker."""
+    from ..compute.calibration import Agreement
     from ..compute.trends import Insufficient
-    from ..store.llm_calls import calls_in_window
 
-    end = args.end or _today(settings)
-    start = (date.fromisoformat(end) - timedelta(days=args.window - 1)).isoformat()
+    if isinstance(got, Insufficient):
+        return f"  {name:16} insufficient overlap (shared days {got.have}, need {got.needed})"
+    assert isinstance(got, Agreement)
+    return (
+        f"  {name:16} n={got.n:4}  bias={got.mean_bias:+.3f}  "
+        f"MAE={got.mae:.3f}  {_fmt_corr(got.correlation)}"
+    )
+
+
+def _cmd_eval_calibration(settings: Settings, args: argparse.Namespace) -> int:
+    """Cross-source agreement (ADR-0012). Deterministic; no tokens, no network.
+
+    Built for the post-membership question — does our recomputed WHOOP metric
+    track the official one? — but deliberately runnable TODAY on weight, where
+    two writers already overlap. The machinery should not be first exercised on
+    the day the membership lapses.
+    """
+    from ..compute.calibration import (
+        SourceSpec,
+        calibration_report,
+        weight_calibration_report,
+    )
 
     conn = db.connect(settings.db_path)
     try:
-        rows = calls_in_window(conn, start=start, end=end, user_id=settings.user_id)
+        if args.domain in ("weight", "all"):
+            a = SourceSpec.parse(args.a or "healthkit:okok")
+            b = SourceSpec.parse(args.b or "myfitnesspal")
+            print(f"── Weight calibration · {b} vs {a} (reference) ──")
+            report = weight_calibration_report(conn, spec_a=a, spec_b=b, user_id=settings.user_id)
+            for metric, got in report.items():
+                print(_fmt_agreement(metric, got))
+            print()
+        if args.domain in ("recovery", "all"):
+            ra = args.a or "whoop_api"
+            rb = args.b or "whoop_ble"
+            if args.domain == "all":
+                ra, rb = "whoop_api", "whoop_ble"
+            print(f"── Recovery calibration · {rb} vs {ra} (reference) ──")
+            rec = calibration_report(conn, source_a=ra, source_b=rb, user_id=settings.user_id)
+            for metric, got in rec.items():
+                print(_fmt_agreement(metric, got))
+            print(
+                "  (whoop_ble rows appear once the BLE adapter lands — ADR-0012. "
+                "Insufficient here is expected, not a fault.)"
+            )
     finally:
         conn.close()
-
-    summary = cost_summary(rows, start=start, end=end)
-    if args.json:
-        import json
-        from dataclasses import asdict
-
-        if isinstance(summary, Insufficient):
-            print(json.dumps({"insufficient": {"have": summary.have, "needed": summary.needed}}))
-        else:
-            print(json.dumps(asdict(summary), indent=2))
-        return 0
-
-    print(f"── LLM spend {start} → {end} ──")
-    if isinstance(summary, Insufficient):
-        # Not "$0.00 spent" — nothing has been recorded, which is a different fact.
-        print("  no calls recorded in this window")
-        print("  (spend is recorded from the first `coach ask` after migration 0013)")
-        return 0
-
-    t = summary.tokens
-    print(f"  calls:      {summary.calls}  ({summary.failed_calls} failed)")
-    print(
-        f"  tokens:     in={t.input_tokens}  out={t.output_tokens}  cached={t.cached_input_tokens}"
-    )
-    if t.cache_write_tokens:
-        print(f"              cache_write={t.cache_write_tokens}")
-    hit = summary.cache_hit_pct
-    print(f"  cache hit:  {f'{hit:.1f}%' if hit is not None else 'n/a (no input tokens)'}")
-    print(f"  cost:       {_fmt_usd(summary.usd)}")
-    if summary.unpriced_calls:
-        print(
-            f"              {summary.unpriced_calls} of {summary.calls} call(s) unpriced "
-            "— set COACH_PRICE_*_PER_MTOK in .env to price them"
-        )
-    print("  by command:")
-    for c in summary.by_command:
-        print(
-            f"    {c.command:<16} {c.calls:>4} call(s)  {c.tokens.total:>9} tok  {_fmt_usd(c.usd)}"
-        )
     return 0
 
 
@@ -1082,11 +1075,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_eh.add_argument("--window", type=int, default=90, help="lookback window in days (default 90)")
     p_eh.set_defaults(func=_cmd_eval_hrv)
 
-    p_cost = sub.add_parser("cost", help="recorded LLM token spend (§8.7; no API call)")
-    p_cost.add_argument("--window", type=int, default=30, help="days ending --end (default 30)")
-    p_cost.add_argument("--end", help="last day_key (default: today in COACH_HOME_TZ)")
-    p_cost.add_argument("--json", action="store_true", help="machine-readable output")
-    p_cost.set_defaults(func=_cmd_cost)
+    p_ecal = eval_sub.add_parser(
+        "calibration", help="cross-source agreement: bias/MAE/correlation (ADR-0012)"
+    )
+    p_ecal.add_argument(
+        "--domain",
+        choices=("weight", "recovery", "all"),
+        default="all",
+        help="which metric family to compare (default: all)",
+    )
+    p_ecal.add_argument("--a", help="reference source, 'source[:source_app]'")
+    p_ecal.add_argument("--b", help="source under test, 'source[:source_app]'")
+    p_ecal.set_defaults(func=_cmd_eval_calibration)
 
     p_doctor = sub.add_parser("doctor", help="config/db/token/data sanity report")
     p_doctor.set_defaults(func=_cmd_doctor)

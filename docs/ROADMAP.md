@@ -56,7 +56,12 @@ The post-membership path; the biggest open item. ADR-0012.
 - **[Next Up · P0]** BLE spike — confirm 5.0 **MG** local read on the actual strap (Bleak, `fd4b` family; whoop-vault reference). _Depends: physical strap._
 - **[Blocked]** Historical drain → `raw_events` (`source='whoop_ble'`, append-only, time-sliced). _Depends: spike._
 - **[Blocked]** Recompute objective metrics from raw (HRV/HR/SpO2/skin-temp; `is_official=0`). _Depends: drain._
-- **[Blocked]** Wire `calibration_report` to a surface (`coach eval calibration`: whoop_api vs whoop_ble). _Depends: whoop_ble rows._
+- **[Done]** `coach eval calibration` wired — and it no longer waits on `whoop_ble`.
+  A weight assembler was added so the machinery runs on today's sibling sources
+  (scale-via-Apple-Health vs MFP), exercising the calibration path before Adapter B
+  exists. Recovery mode honestly reports insufficient (0 shared days) until the spike
+  lands. _Note: the live weight pair agrees to 28 g MAE, which means they are not
+  independent measurements — a machinery smoke test, not instrument validation._
 - **[Blocked]** Precedence flip at membership end (one-line resolver reorder). _Depends: calibration acceptance._
 
 ## P9 — The differentiator

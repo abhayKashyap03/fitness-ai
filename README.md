@@ -75,6 +75,7 @@ coach db backup                    # consistent online snapshot
 coach db verify                    # integrity + row counts + rebuild fingerprint
 coach doctor                       # config/db/token sanity report
 coach eval hrv                     # is HRV signal or noise on YOUR data? (no tokens)
+coach eval calibration             # cross-source agreement: bias/MAE/correlation (no tokens)
 coach eval grounding               # live zero-fabrication eval (burns tokens)
 coach cost                         # recorded token spend + cache hit rate (no tokens)
 coach normalize --rebuild          # re-derive ALL canonical rows from raw
