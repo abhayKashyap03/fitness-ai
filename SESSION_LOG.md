@@ -44,14 +44,55 @@ Recovery→macro stays correctly gated.
 
 ---
 
-## Where the code stands (verified 2026-07-30)
+## Session 2026-08-02 — multi-tenant foundation (ADR-0018, migration 0014)
+
+The §11 lift, for real. The human chose all three forks explicitly: **invite-only
+beta (~5–30)**, **SQLite on a persistent volume** (not Postgres), **per-user
+secrets encrypted at rest with a host-held key**. Recorded in
+[ADR-0018](docs/adr/0018-multi-tenant-foundation.md) before any code.
+
+**Also a correction worth keeping:** I had repeatedly called the BLE spike
+"blocked, needs the strap for an evening", parroting ADR-0012 and TASKS' Blocked
+list. The user has worn the strap daily for the whole project. It was never
+blocked on hardware availability — only on nobody doing it. Check whether a
+documented blocker is still real before repeating it.
+
+- **Migration 0014** — `app_user`, `user_invite`, `user_session`, `user_secret`.
+  `user_id` has been on every row since 0001 (§2.4); this cashes it in. Nothing
+  existing changes: user 1 is seeded as the owner, **unclaimed** (no email, no
+  password), which is the honest state rather than a fabricated address.
+- **Passwords and tokens are never stored.** scrypt (stdlib) for passwords;
+  sessions and invites persist only SHA-256 of the token, so a stolen dump can't
+  be replayed as a live session.
+- **`user_secret` is the one deliberately non-append-only table.** Everything
+  else keeps history on principle (§2.1); a superseded refresh token has no
+  analytical value and retaining every ciphertext only widens the blast radius.
+- **AES-256-GCM with `user_id`+`name` as AAD**, so a ciphertext lifted from one
+  user's row fails to decrypt under another's — tested by transplanting a row.
+- **One new dependency, `cryptography`** (§6.4 sign-off in ADR-0018). The stdlib
+  ships no AEAD and hand-rolling one here would be the wrong instinct.
+- **Bug found in my own code, before shipping:** `login()` carried a comment
+  claiming timing-equalisation it did not implement — `verify_password`
+  short-circuits when no digest exists, so an unknown email answered measurably
+  faster than a real one. That is an account-enumeration oracle by stopwatch, on
+  a health app. Added `_burn_password_work()` and a ratio test.
+- +80 tests. **639 green**; ruff + mypy clean.
+
+**Nothing is wired to the web app yet** — merging this changes no behavior. That
+is PR B.
+
+⚠️ **§8.6 stops being theoretical here.** The calorie floor and max-loss-rate
+guardrails currently protect one consenting adult who wrote them. With other
+people logging in they protect strangers. **Medical disclaimers must land before
+a second human logs in** — recorded in ADR-0018 as a hard prerequisite, not a
+backlog item.
 
 ---
 
-## Where the code stands (verified 2026-07-30)
+## Where the code stands (verified 2026-08-02)
 
-- **572 tests green; ruff + mypy clean. Schema at v13** (migrations 0001–0013).
-  PRs #12–#25 merged.
+- **639 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).
+  PRs #12–#28 merged; multi-tenant foundation open for review.
 - **Zero-fabrication eval at 50 scenarios covering all 9 tools — 50/50 passing
   live on Grok.** Zero fabrications found.
 - **LLM spend is recorded and reportable** (`coach cost`); rates unset, so spend
@@ -78,9 +119,10 @@ Recovery→macro stays correctly gated.
   user's call, do not act.
 
 ### What's next → see [TASKS.md](TASKS.md) ▶ NEXT UP
-The big open item is the **BLE hardware spike** (Adapter B, ADR-0012) — the
-subscription-survival play; needs the physical MG strap. The plan layer's daily
-calorie goal fills in once TDEE crosses 10 logged-intake days (no code).
+Now the **hosted multi-tenant backend** (ADR-0018): wire auth into the web app,
+then hosting, then per-user ingest. The **BLE spike** (ADR-0012) is *not* blocked
+on hardware — the strap is worn daily and always has been; it is blocked only on
+someone doing it, and it needs `bleak` (a dependency needing §6.4 sign-off).
 
 ---
 
