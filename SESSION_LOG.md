@@ -89,10 +89,66 @@ backlog item.
 
 ---
 
+## Session 2026-08-02 (b) — auth wired into the web app (PR B)
+
+Where the localhost-only assumption dies. Every route used to hardcode
+`user_id=1`; now the request decides.
+
+**The fail-closed rule** is the load-bearing part, not the login form. Exactly one
+case may proceed without a session: **loopback bind AND nobody has claimed an
+account** — the existing single-user laptop workflow, which must not break. The
+moment either condition stops holding:
+
+- any user has a password → auth required even on localhost (you cannot lock the
+  door and leave the back window open);
+- non-loopback bind with no claimed account → **the app refuses to start**, with
+  the commands to fix it. A runtime warning nobody reads is not good enough when
+  the failure is "personal health data served to a network with no credentials".
+
+- **Per-request user via a ContextVar** set by middleware, rather than threading a
+  parameter through two dozen handlers that are not about authentication.
+  Closed by default: only `/login`, `/invite`, `/healthz`, `/static` are public,
+  so a route added tomorrow is protected by existing rather than by remembering.
+- **API gets 401, pages get 303 to /login** — a `fetch()` cannot follow a
+  redirect usefully and a browser cannot do anything with a 401 body.
+- Cookies HttpOnly + SameSite=Lax, Secure whenever the request arrived over HTTPS
+  (so a TLS proxy gets it automatically without breaking plain-HTTP localhost).
+- **`coach user genkey|list|set-email|set-password|invite`.** `set-password`
+  prompts without echo and has no `--password` flag on purpose: a flag puts the
+  secret in shell history and the process list. `genkey` prints to stdout and
+  writes nowhere.
+- **Bug caught by the suite, not by me:** background jobs (sync/ingest/normalize)
+  run on other threads and outlive the request, so the ContextVar was gone by the
+  time they executed. Now the submitting user is captured at submit time and
+  re-established inside the worker — which also means a job can never act as
+  somebody else because it happened to run later.
+- **Bug caught by running it:** `coach web` printed "Dashboard: http://…" *before*
+  building the app, so a refusal was preceded by a cheerful URL that never became
+  true. Also replaced the now-false "NO authentication" warning with an accurate
+  one about the missing HTTPS.
+- +17 tests. **656 green**; ruff + mypy clean.
+
+**The test that matters** is `test_a_member_cannot_see_the_owners_data`: two
+tenants, one database, owner has a weigh-in, member has none. If the member's
+session ever returns 83.0 kg, multi-tenancy is broken and one person's health data
+is reaching another. Passed first run, as did "a member's plan lands on their own
+account".
+
+**Live-verified** on a throwaway DB: network bind unclaimed refuses with
+instructions; after `set-email` + `set-password` it starts; anonymous `GET /` →
+303 `/login`, `/api/status` → 401, `/healthz` → 200; after login both → 200. Login
+page screenshotted (nav correctly hidden when signed out).
+
+⚠️ Still true from ADR-0018: **medical disclaimers must land before a second human
+logs in.** The invite page carries a plain-language "not a medical device" notice,
+which is a start, not the whole obligation.
+
+---
+
 ## Where the code stands (verified 2026-08-02)
 
-- **639 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).
-  PRs #12–#28 merged; multi-tenant foundation open for review.
+- **656 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).
+  PRs #12–#29 merged; web auth open for review.
 - **Zero-fabrication eval at 50 scenarios covering all 9 tools — 50/50 passing
   live on Grok.** Zero fabrications found.
 - **LLM spend is recorded and reportable** (`coach cost`); rates unset, so spend

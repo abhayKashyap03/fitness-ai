@@ -102,7 +102,9 @@ Lifts §11's no-server / no-multi-tenancy for real.
   (migration 0014): invite-only users, scrypt passwords, hashed session tokens,
   per-user secrets encrypted at rest. **Decided: SQLite on a volume, NOT hosted
   Postgres** — it keeps all 13 prior migrations and every view working unchanged,
-  and is a two-way door. Next: wire auth into the web app, then hosting.
+  and is a two-way door. Auth is now **wired into the web app** (PR B): per-request user, closed by
+  default, and a non-loopback bind with no claimed account refuses to start.
+  Next: hosting, then per-user ingest.
 - **[Backlog]** Move compute + coach server-side (pure Python lifts cleanly). _Depends: foundation._
 - **[Backlog]** Ingest/sync as a service + `user_id` activation. _Depends: foundation._
 - **[Backlog]** Per-user secrets/config (not `.env`; encrypted; never logged). _Depends: foundation._

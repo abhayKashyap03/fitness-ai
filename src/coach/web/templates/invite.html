@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Coach · Accept invite{% endblock %}
+
+{% block content %}
+<h1>Set your password</h1>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<div class="card" style="max-width:26rem">
+  <form method="post" action="/invite/{{ token }}">
+    <label for="password">Choose a password</label>
+    <input id="password" type="password" name="password"
+           autocomplete="new-password" minlength="12" required autofocus>
+    <p class="note">At least 12 characters. Length is the only rule — a
+      passphrase from a password manager beats a short one with symbols in it.</p>
+
+    <p><button type="submit">Create account</button></p>
+  </form>
+</div>
+
+<div class="card" style="max-width:26rem;margin-top:1rem">
+  <p class="note"><strong>Before you start.</strong> This is a personal project,
+    not a medical device. It computes calorie and training targets from your own
+    logged data and it can be wrong. It does not diagnose anything, and it is not
+    a substitute for a doctor or a dietitian — especially if you have any medical
+    condition, are pregnant, or have a history of disordered eating.</p>
+</div>
+{% endblock %}

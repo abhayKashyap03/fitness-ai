@@ -612,6 +612,116 @@ def _cmd_eval_calibration(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- user / auth (ADR-0018) ------------------------------------------------
+
+
+def _cmd_user_genkey(_settings: Settings, _args: argparse.Namespace) -> int:
+    """Print a fresh AES-256 key for COACH_SECRET_KEY.
+
+    Printed to stdout and never written anywhere: the key must live in the host
+    environment, and a tool that helpfully saved it into the repo or the DB
+    would defeat the entire point of encrypting at rest.
+    """
+    from ..store.secrets_store import generate_key
+
+    print(generate_key())
+    print(
+        "\nPut this in the host environment as COACH_SECRET_KEY. Never commit it, "
+        "never store it in the database.\nLose it and every stored credential must "
+        "be re-entered.",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _cmd_user_list(settings: Settings, _args: argparse.Namespace) -> int:
+    from ..store.users import list_users
+
+    conn = db.connect(settings.db_path)
+    try:
+        users = list_users(conn)
+    finally:
+        conn.close()
+    print(f"{'id':>3}  {'email':<32} {'role':<7} {'status':<9} password")
+    for u in users:
+        email = u.email or "(unclaimed)"
+        print(
+            f"{u.id:>3}  {email:<32} {u.role:<7} {u.status:<9} "
+            f"{'set' if u.has_password else 'NOT SET'}"
+        )
+    return 0
+
+
+def _cmd_user_set_email(settings: Settings, args: argparse.Namespace) -> int:
+    from ..store.users import set_email
+
+    conn = db.connect(settings.db_path)
+    try:
+        set_email(conn, user_id=args.user_id, email=args.email)
+        conn.commit()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    print(f"user {args.user_id} email set to {args.email}")
+    return 0
+
+
+def _cmd_user_set_password(settings: Settings, args: argparse.Namespace) -> int:
+    """Set a password, prompting without echo. Never accepts it as an argument.
+
+    A --password flag would put the secret in shell history and in the process
+    list, where every other user on the machine can read it.
+    """
+    import getpass
+
+    from ..store.users import MIN_PASSWORD_LEN, set_password
+
+    pw = getpass.getpass("New password: ")
+    if pw != getpass.getpass("Repeat: "):
+        print("Passwords did not match.", file=sys.stderr)
+        return 2
+    if len(pw) < MIN_PASSWORD_LEN:
+        print(f"Password must be at least {MIN_PASSWORD_LEN} characters.", file=sys.stderr)
+        return 2
+    conn = db.connect(settings.db_path)
+    try:
+        set_password(conn, user_id=args.user_id, password=pw)
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"Password set for user {args.user_id}. All existing sessions were revoked.")
+    return 0
+
+
+def _cmd_user_invite(settings: Settings, args: argparse.Namespace) -> int:
+    """Issue an invite and print its link ONCE.
+
+    Only the token's hash is stored, so this output cannot be recovered later —
+    if it is lost, issue another invite.
+    """
+    from ..store.users import create_invite
+
+    conn = db.connect(settings.db_path)
+    try:
+        token = create_invite(conn, email=args.email, invited_by=args.invited_by)
+        conn.commit()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    base = args.base_url.rstrip("/")
+    print(f"{base}/invite/{token}")
+    print(
+        f"\nSend this to {args.email}. It expires in 7 days and works once.\n"
+        "Shown only now — the token is stored hashed and cannot be printed again.",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _fmt_corr(c: object) -> str:
     from ..compute.hrv_validation import Correlation
     from ..compute.trends import Insufficient
@@ -893,10 +1003,11 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def _cmd_web(settings: Settings, args: argparse.Namespace) -> int:
-    """Serve the local dashboard (ADR-0014).
+    """Serve the dashboard (ADR-0014, auth per ADR-0018).
 
-    Binds localhost by default: this serves personal health data with no
-    authentication, so exposing it on a network must be a deliberate act.
+    Binds localhost by default. On a non-loopback address the app refuses to
+    start unless an account has been claimed, so health data can never reach a
+    network unauthenticated.
     """
     try:
         import uvicorn
@@ -916,14 +1027,35 @@ def _cmd_web(settings: Settings, args: argparse.Namespace) -> int:
     finally:
         conn.close()
 
+    from ..web.auth import StartupRefused
+
+    # Build BEFORE announcing anything: a refusal must not be preceded by a
+    # cheerful "Dashboard: http://..." line that never becomes true.
+    try:
+        app = create_app(settings, bind_host=args.host)
+    except StartupRefused as exc:
+        # Fail closed: a non-loopback bind with no account claimed would serve
+        # health data to the network unauthenticated (ADR-0018).
+        print(f"Refusing to start.\n{exc}", file=sys.stderr)
+        return 2
+
     if args.host not in {"127.0.0.1", "localhost"}:
         print(
-            f"WARNING: binding {args.host} exposes your health data on the network "
-            "with NO authentication. Use only on a network you trust.",
+            f"NOTE: binding {args.host} exposes this server to your network. "
+            "Every request needs a login, but there is no HTTPS here — put it "
+            "behind a TLS-terminating proxy before exposing it beyond a network "
+            "you trust.",
+            file=sys.stderr,
+        )
+    elif app.state.auth_policy.open_local:
+        print(
+            "NOTE: no account has a password yet, so localhost requests are served "
+            "without a login (single-user mode). Run `coach user set-password` to "
+            "require one.",
             file=sys.stderr,
         )
     print(f"Dashboard: http://{args.host}:{args.port}  (Ctrl-C to stop)")
-    uvicorn.run(create_app(settings), host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 
 
@@ -1087,6 +1219,32 @@ def build_parser() -> argparse.ArgumentParser:
     p_ecal.add_argument("--a", help="reference source, 'source[:source_app]'")
     p_ecal.add_argument("--b", help="source under test, 'source[:source_app]'")
     p_ecal.set_defaults(func=_cmd_eval_calibration)
+
+    p_user = sub.add_parser("user", help="accounts, invites and the secret key (ADR-0018)")
+    user_sub = p_user.add_subparsers(dest="user_command", required=True)
+
+    p_gk = user_sub.add_parser("genkey", help="print a fresh COACH_SECRET_KEY")
+    p_gk.set_defaults(func=_cmd_user_genkey)
+
+    p_ul = user_sub.add_parser("list", help="list accounts")
+    p_ul.set_defaults(func=_cmd_user_list)
+
+    p_ue = user_sub.add_parser("set-email", help="claim an account's email")
+    p_ue.add_argument("email")
+    p_ue.add_argument("--user-id", type=int, default=1)
+    p_ue.set_defaults(func=_cmd_user_set_email)
+
+    p_up = user_sub.add_parser("set-password", help="set a password (prompts, no echo)")
+    p_up.add_argument("--user-id", type=int, default=1)
+    p_up.set_defaults(func=_cmd_user_set_password)
+
+    p_ui = user_sub.add_parser("invite", help="issue an invite link (shown once)")
+    p_ui.add_argument("email")
+    p_ui.add_argument("--invited-by", type=int, default=1)
+    p_ui.add_argument(
+        "--base-url", default="http://127.0.0.1:8000", help="where the app is reachable"
+    )
+    p_ui.set_defaults(func=_cmd_user_invite)
 
     p_doctor = sub.add_parser("doctor", help="config/db/token/data sanity report")
     p_doctor.set_defaults(func=_cmd_doctor)
