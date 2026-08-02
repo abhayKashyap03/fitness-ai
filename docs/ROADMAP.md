@@ -98,7 +98,11 @@ The post-membership path; the biggest open item. ADR-0012.
 
 Lifts §11's no-server / no-multi-tenancy for real.
 
-- **[Backlog · EPIC · P1]** Multi-tenant backend: auth, hosted Postgres, API layer (`user_id` already everywhere).
+- **[In Progress · EPIC · P1]** Multi-tenant backend (ADR-0018). **Foundation landed**
+  (migration 0014): invite-only users, scrypt passwords, hashed session tokens,
+  per-user secrets encrypted at rest. **Decided: SQLite on a volume, NOT hosted
+  Postgres** — it keeps all 13 prior migrations and every view working unchanged,
+  and is a two-way door. Next: wire auth into the web app, then hosting.
 - **[Backlog]** Move compute + coach server-side (pure Python lifts cleanly). _Depends: foundation._
 - **[Backlog]** Ingest/sync as a service + `user_id` activation. _Depends: foundation._
 - **[Backlog]** Per-user secrets/config (not `.env`; encrypted; never logged). _Depends: foundation._
