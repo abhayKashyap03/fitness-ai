@@ -274,3 +274,109 @@ def test_jobs_cannot_be_started_anonymously(migrated_conn, db_path):
     _claim_owner(migrated_conn)
     client = _client(db_path)
     assert client.post("/api/jobs/normalize", json={}).status_code == 401
+
+
+# ---- /account ---------------------------------------------------------------
+#
+# The nav linked /account before the route existed, so the tab 404'd with
+# {"detail":"Not found"}. Shipped in the same PR that added the link.
+
+
+def _signed_in(db_path, email="owner@example.test", password=OWNER_PW) -> TestClient:
+    client = _client(db_path)
+    client.post("/login", data={"email": email, "password": password}, follow_redirects=False)
+    return client
+
+
+def test_account_page_exists_for_every_link_in_the_nav(migrated_conn, db_path):
+    """A nav link with no route behind it is a 404 the user finds, not a test."""
+    _claim_owner(migrated_conn)
+    client = _signed_in(db_path)
+    body = client.get("/").text
+    for href in ("/", "/plan", "/coach", "/ops", "/doctor", "/account"):
+        if f'href="{href}"' in body:
+            assert client.get(href).status_code == 200, href
+
+
+def test_account_shows_who_you_are(migrated_conn, db_path):
+    _claim_owner(migrated_conn)
+    r = _signed_in(db_path).get("/account")
+    assert r.status_code == 200
+    assert "owner@example.test" in r.text
+
+
+def test_changing_the_password_requires_the_current_one(migrated_conn, db_path):
+    _claim_owner(migrated_conn)
+    client = _signed_in(db_path)
+    r = client.post(
+        "/account/password",
+        data={"current": "not my password", "new": "a fresh long password"},
+    )
+    assert r.status_code == 200
+    assert "current password is incorrect" in r.text
+    # the old password must still work
+    assert _signed_in(db_path).get("/account").status_code == 200
+
+
+def test_changing_the_password_signs_you_out(migrated_conn, db_path):
+    """Every session is revoked, which is the point of changing it."""
+    _claim_owner(migrated_conn)
+    client = _signed_in(db_path)
+    r = client.post(
+        "/account/password",
+        data={"current": OWNER_PW, "new": "a fresh long password"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert client.get("/api/status", follow_redirects=False).status_code == 401
+    # and the NEW password works
+    fresh = _signed_in(db_path, password="a fresh long password")
+    assert fresh.get("/account").status_code == 200
+
+
+def test_owner_can_mint_an_invite_link_from_the_page(migrated_conn, db_path):
+    _claim_owner(migrated_conn)
+    r = _signed_in(db_path).post("/account/invite", data={"email": "friend@example.test"})
+    assert r.status_code == 200
+    assert "/invite/" in r.text
+
+
+def test_a_member_cannot_mint_invites(migrated_conn, db_path):
+    """Invite-only means the owner decides who joins."""
+    _claim_owner(migrated_conn)
+    _add_member(migrated_conn)
+    client = _signed_in(db_path, email="friend@example.test", password=MEMBER_PW)
+    assert client.post("/account/invite", data={"email": "gatecrasher@x.test"}).status_code == 403
+
+
+def test_a_member_does_not_see_the_account_list(migrated_conn, db_path):
+    _claim_owner(migrated_conn)
+    _add_member(migrated_conn)
+    body = _signed_in(db_path, email="friend@example.test", password=MEMBER_PW).get("/account").text
+    assert "owner@example.test" not in body
+
+
+def test_revoke_all_sessions_signs_you_out(migrated_conn, db_path):
+    _claim_owner(migrated_conn)
+    client = _signed_in(db_path)
+    r = client.post("/account/sessions/revoke", follow_redirects=False)
+    assert r.status_code == 303
+    assert client.get("/api/status").status_code == 401
+
+
+def test_password_forms_advertise_the_real_minimum(migrated_conn, db_path):
+    """The templates hardcoded 12 while the constant said 8.
+
+    A browser would then refuse a password the server accepts — a silent,
+    confusing block on a form that looks like it is working.
+    """
+    from coach.store.users import MIN_PASSWORD_LEN
+
+    _claim_owner(migrated_conn)
+    token = U.create_invite(migrated_conn, email="friend@example.test", invited_by=1)
+    migrated_conn.commit()
+    invite_body = _client(db_path).get(f"/invite/{token}").text
+    account_body = _signed_in(db_path).get("/account").text
+    for body in (invite_body, account_body):
+        assert f'minlength="{MIN_PASSWORD_LEN}"' in body
+        assert f"At least {MIN_PASSWORD_LEN} characters" in body

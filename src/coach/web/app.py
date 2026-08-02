@@ -21,7 +21,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -59,12 +59,17 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 _REQUEST_USER: ContextVar[U.User | None] = ContextVar("coach_request_user", default=None)
 
 
-def _uid() -> int:
-    """The current request's user id. Raises if authentication never ran."""
+def _me() -> U.User:
+    """The current request's user. Raises if authentication never ran."""
     user = _REQUEST_USER.get()
     if user is None:
         raise HTTPException(status_code=401, detail="authentication required")
-    return user.id
+    return user
+
+
+def _uid() -> int:
+    """The current request's user id."""
+    return _me().id
 
 
 # Paths reachable without a session: the login form itself, invite redemption,
@@ -214,7 +219,9 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
         at this point would let someone probe which invite links are live.
         """
         return templates.TemplateResponse(
-            request=request, name="invite.html", context={"token": token, "error": None}
+            request=request,
+            name="invite.html",
+            context={"token": token, "error": None, "min_password_len": U.MIN_PASSWORD_LEN},
         )
 
     @app.post("/invite/{token}", response_class=HTMLResponse, dependencies=[Depends(_same_origin)])
@@ -230,7 +237,11 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
                 return templates.TemplateResponse(
                     request=request,
                     name="invite.html",
-                    context={"token": token, "error": str(exc)},
+                    context={
+                        "token": token,
+                        "error": str(exc),
+                        "min_password_len": U.MIN_PASSWORD_LEN,
+                    },
                     status_code=400,
                 )
         response = RedirectResponse("/", status_code=303)
@@ -328,6 +339,93 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
             "answer": result.text,
             "tool_calls": [{"name": c.name, "args": c.args} for c in result.tool_calls],
         }
+
+    @app.get("/account", response_class=HTMLResponse)
+    def page_account(request: Request) -> Any:
+        with _conn() as conn:
+            users = U.list_users(conn) if _me().role == "owner" else []
+            sessions = conn.execute(
+                "SELECT COUNT(*) AS n FROM user_session WHERE user_id = ? AND "
+                "revoked_at IS NULL AND expires_at > ?",
+                (_uid(), datetime.now(UTC).isoformat()),
+            ).fetchone()["n"]
+        return templates.TemplateResponse(
+            request=request,
+            name="account.html",
+            context={
+                "me": _me(),
+                "users": users,
+                "sessions": sessions,
+                "min_password_len": U.MIN_PASSWORD_LEN,
+                "invite_link": None,
+                "error": None,
+                "notice": None,
+            },
+        )
+
+    def _account_page(request: Request, **over: Any) -> Any:
+        """Re-render /account after a POST, without duplicating its context."""
+        with _conn() as conn:
+            users = U.list_users(conn) if _me().role == "owner" else []
+            sessions = conn.execute(
+                "SELECT COUNT(*) AS n FROM user_session WHERE user_id = ? AND "
+                "revoked_at IS NULL AND expires_at > ?",
+                (_uid(), datetime.now(UTC).isoformat()),
+            ).fetchone()["n"]
+        ctx: dict[str, Any] = {
+            "me": _me(),
+            "users": users,
+            "sessions": sessions,
+            "min_password_len": U.MIN_PASSWORD_LEN,
+            "invite_link": None,
+            "error": None,
+            "notice": None,
+        }
+        ctx.update(over)
+        return templates.TemplateResponse(
+            request=request, name="account.html", context=ctx, status_code=over.pop("code", 200)
+        )
+
+    @app.post(
+        "/account/password", response_class=HTMLResponse, dependencies=[Depends(_same_origin)]
+    )
+    def post_change_password(
+        request: Request, current: str = Form(...), new: str = Form(...)
+    ) -> Any:
+        with _conn() as conn:
+            try:
+                U.change_password(conn, user_id=_uid(), current=current, new=new)
+                conn.commit()
+            except ValueError as exc:
+                return _account_page(request, error=str(exc))
+        # change_password revokes every session, including this one, so the
+        # browser must sign in again — which is the point of changing it.
+        response = RedirectResponse("/login", status_code=303)
+        clear_session_cookie(response)
+        return response
+
+    @app.post("/account/invite", response_class=HTMLResponse, dependencies=[Depends(_same_origin)])
+    def post_create_invite(request: Request, email: str = Form(...)) -> Any:
+        me = _me()
+        if me.role != "owner":
+            raise HTTPException(status_code=403, detail="owner only")
+        with _conn() as conn:
+            try:
+                token = U.create_invite(conn, email=email, invited_by=me.id)
+                conn.commit()
+            except ValueError as exc:
+                return _account_page(request, error=str(exc))
+        base = str(request.base_url).rstrip("/")
+        return _account_page(request, invite_link=f"{base}/invite/{token}")
+
+    @app.post("/account/sessions/revoke", dependencies=[Depends(_same_origin)])
+    def post_revoke_sessions(request: Request) -> Any:
+        with _conn() as conn:
+            U.revoke_all_sessions(conn, user_id=_uid())
+            conn.commit()
+        response = RedirectResponse("/login", status_code=303)
+        clear_session_cookie(response)
+        return response
 
     # ---- pages ------------------------------------------------------------
 

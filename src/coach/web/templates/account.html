@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% set nav = 'account' %}
+{% block title %}Coach · Account{% endblock %}
+
+{% block content %}
+<h1>Account</h1>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>You</h2>
+  <div class="row"><span class="k">email</span><span class="v">{{ me.email or 'not set' }}</span></div>
+  <div class="row"><span class="k">role</span><span class="v">{{ me.role }}</span></div>
+  <div class="row"><span class="k">active sessions</span><span class="v">{{ sessions }}</span></div>
+  <form method="post" action="/account/sessions/revoke" style="margin-top:.8rem">
+    <button type="submit">Sign out everywhere</button>
+  </form>
+  <p class="note">Revokes every session including this one. Use it if you have
+    signed in somewhere you no longer control.</p>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>Change password</h2>
+  <form method="post" action="/account/password">
+    <label for="current">Current password</label>
+    <input id="current" type="password" name="current" autocomplete="current-password" required>
+
+    <label for="new">New password</label>
+    <input id="new" type="password" name="new" autocomplete="new-password"
+           minlength="{{ min_password_len }}" required>
+    <p class="note">At least {{ min_password_len }} characters. Length is the only
+      rule — a passphrase beats a short one with symbols in it.</p>
+
+    <p><button type="submit">Change password</button></p>
+  </form>
+  <p class="note">Every session is revoked, so you will be signed out and asked
+    to sign in again. There is no self-service reset — if you forget it, recovery
+    is <code>coach user set-password</code> on the machine running the server.</p>
+</div>
+
+{% if me.role == 'owner' %}
+<div class="card" style="margin-bottom:1rem">
+  <h2>Invite someone</h2>
+
+  {% if invite_link %}
+    <div class="row" style="display:block">
+      <p><strong>Send them this link.</strong> It is shown once and cannot be
+        recovered — only its hash is stored.</p>
+      <p><code style="word-break:break-all">{{ invite_link }}</code></p>
+      <p class="note">Expires in 7 days, works once. Delivery is up to you; the
+        app sends no email.</p>
+    </div>
+  {% else %}
+    <form method="post" action="/account/invite">
+      <label for="email">Their email</label>
+      <input id="email" type="email" name="email" required>
+      <p><button type="submit">Create invite link</button></p>
+    </form>
+  {% endif %}
+
+  <p class="note"><strong>Before you invite anyone:</strong> this computes calorie
+    and training targets from logged data and can be wrong. It does not diagnose
+    anything and is not a substitute for a doctor or dietitian. Make sure they
+    know that.</p>
+</div>
+
+<div class="card">
+  <h2>Accounts</h2>
+  {% for u in users %}
+    <div class="row">
+      <span class="k">{{ u.email or '(unclaimed)' }}</span>
+      <span class="v">{{ u.role }} · {{ u.status }} ·
+        {{ 'password set' if u.has_password else 'NO PASSWORD' }}</span>
+    </div>
+  {% endfor %}
+  <p class="note">Accounts are created by invite only. Disabling one is
+    <code>coach user</code> territory for now.</p>
+</div>
+{% endif %}
+{% endblock %}

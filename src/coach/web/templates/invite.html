@@ -10,8 +10,8 @@
   <form method="post" action="/invite/{{ token }}">
     <label for="password">Choose a password</label>
     <input id="password" type="password" name="password"
-           autocomplete="new-password" minlength="12" required autofocus>
-    <p class="note">At least 12 characters. Length is the only rule — a
+           autocomplete="new-password" minlength="{{ min_password_len }}" required autofocus>
+    <p class="note">At least {{ min_password_len }} characters. Length is the only rule — a
       passphrase from a password manager beats a short one with symbols in it.</p>
 
     <p><button type="submit">Create account</button></p>

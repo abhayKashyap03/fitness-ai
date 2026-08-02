@@ -42,7 +42,7 @@ ROLES = frozenset({"owner", "member"})
 # Password floor. Deliberately a length rule and nothing else: composition rules
 # ("one symbol, one digit") measurably push people toward weaker, more guessable
 # passwords, and this is a beta for people who will use a password manager.
-MIN_PASSWORD_LEN = 12
+MIN_PASSWORD_LEN = 8
 
 
 @dataclass(frozen=True)
@@ -231,6 +231,24 @@ def set_password(conn: sqlite3.Connection, *, user_id: int, password: str) -> No
         (digest, salt, now, user_id),
     )
     revoke_all_sessions(conn, user_id=user_id)
+
+
+def change_password(conn: sqlite3.Connection, *, user_id: int, current: str, new: str) -> None:
+    """Self-service password change: prove the old one first.
+
+    Separate from :func:`set_password`, which is the CLI/admin path and assumes
+    the caller already has machine access. Over the web the current password is
+    the only evidence that the person at the keyboard is the account holder and
+    not someone who found an unlocked laptop.
+    """
+    row = conn.execute(
+        "SELECT password_hash, password_salt FROM app_user WHERE id = ?", (user_id,)
+    ).fetchone()
+    if row is None or not verify_password(
+        current, digest_hex=row["password_hash"], salt_hex=row["password_salt"]
+    ):
+        raise ValueError("current password is incorrect")
+    set_password(conn, user_id=user_id, password=new)
 
 
 def set_email(conn: sqlite3.Connection, *, user_id: int, email: str) -> None:
