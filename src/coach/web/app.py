@@ -561,7 +561,7 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
         return templates.TemplateResponse(
             request=request,
             name="food.html",
-            context={"nav": "food", "query": q, "results": results, "error": error, "logged": None},
+            context={"nav": "food", "query": q, "results": results, "error": error, "logged": None, "logged_exercise": None},
         )
 
     @app.post("/food", response_class=HTMLResponse, dependencies=[Depends(_same_origin)])
@@ -607,6 +607,53 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
                 "results": None,
                 "error": error,
                 "logged": logged,
+                "logged_exercise": None,
+            },
+        )
+
+    @app.post("/exercise", response_class=HTMLResponse, dependencies=[Depends(_same_origin)])
+    def submit_exercise(
+        request: Request,
+        sport: str = Form(...),
+        minutes: float = Form(...),
+        kcal: str = Form(default=""),
+    ) -> Any:
+        """Hand-log a training session. Same service seam the CLI uses."""
+        from ..services.exercise_log import log_exercise
+
+        day = _today(cfg)
+        # Noon local, for the same reason the CLI does it: midnight sits on a day
+        # boundary and could put the session on the wrong physiological day.
+        local = datetime.fromisoformat(f"{day}T12:00").replace(tzinfo=ZoneInfo(cfg.home_tz))
+        raw_off = local.strftime("%z")
+        logged_exercise = None
+        error: str | None = None
+        with _conn() as conn:
+            try:
+                logged_exercise = log_exercise(
+                    conn,
+                    sport=sport,
+                    duration_s=int(minutes * 60),
+                    started_at=local.isoformat(),
+                    utc_offset=f"{raw_off[:3]}:{raw_off[3:]}" if raw_off else None,
+                    tz_name=cfg.home_tz,
+                    # Blank means unknown, not zero (§2.7) — no estimate is made.
+                    kcal=float(kcal) if kcal.strip() else None,
+                    user_id=_uid(),
+                )
+                conn.commit()
+            except ValueError as exc:
+                error = str(exc)
+        return templates.TemplateResponse(
+            request=request,
+            name="food.html",
+            context={
+                "nav": "food",
+                "query": None,
+                "results": None,
+                "error": error,
+                "logged": None,
+                "logged_exercise": logged_exercise,
             },
         )
 

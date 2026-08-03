@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Coach · Food{% endblock %}
+{% block title %}Coach · Log{% endblock %}
 
 {% block content %}
-<h1>Log food</h1>
+<h1>Log</h1>
 <p class="note">Open Food Facts — free and open. Search by product name, or paste
   a barcode straight from a packet.</p>
 
@@ -52,4 +52,26 @@
   </div>
   {% endif %}
 {% endif %}
+
+<h2 style="margin-top:1.6rem">Training</h2>
+<div class="card" style="max-width:34rem">
+  {% if logged_exercise %}
+  <p>Logged <strong>{{ logged_exercise.duration_s // 60 }} min {{ logged_exercise.sport_type }}</strong>
+     on {{ logged_exercise.day_key }}{% if logged_exercise.kcal is not none %} — {{ logged_exercise.kcal|round(0)|int }} kcal{% endif %}.</p>
+  {% if logged_exercise.kcal is none %}
+  {# Absence said out loud (§2.7). No estimate is invented from duration + sport
+     (ADR-0007), so the user should know this session is not in the day's balance. #}
+  <p class="note">No calories recorded — this session does not count toward energy balance.</p>
+  {% endif %}
+  {% endif %}
+  <form method="post" action="/exercise">
+    <label for="sport">Sport</label>
+    <input id="sport" name="sport" placeholder="strength, run, cycle, walk, hiit…" required>
+    <label for="minutes">Minutes</label>
+    <input id="minutes" name="minutes" type="number" min="1" step="1" value="45" required>
+    <label for="ex_kcal">Calories <span class="note">(optional — never estimated)</span></label>
+    <input id="ex_kcal" name="kcal" type="number" min="0" step="1" placeholder="leave blank if unknown">
+    <p style="margin-top:.7rem"><button type="submit">Log session</button></p>
+  </form>
+</div>
 {% endblock %}
