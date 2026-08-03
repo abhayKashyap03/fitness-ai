@@ -68,6 +68,12 @@
   .err { border-left: 3px solid var(--bad); background: rgba(224,90,90,.08);
          padding: .6rem .8rem; border-radius: 4px; margin-bottom: 1rem; }
   svg .line { fill: none; stroke: var(--accent); stroke-width: 2; }
+  /* §8.6. Quiet, but on every page that shows a target — not only where it is
+     convenient. Muted rather than alarming: a banner shouting on every screen
+     gets tuned out within a day, which is the failure mode, not the goal. */
+  footer { max-width: 940px; margin: 0 auto; padding: 1.5rem 1.25rem 2.5rem;
+           color: var(--absent); font-size: .8rem; border-top: 1px solid var(--line); }
+  footer a { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -94,5 +100,8 @@
   {% endif %}
 </header>
 <main>{% block content %}{% endblock %}</main>
+{% if me %}
+<footer>{{ disclaimer_short }} <a href="/safety">Read the full notice</a>.</footer>
+{% endif %}
 </body>
 </html>

@@ -51,8 +51,14 @@ def test_localhost_with_no_account_claimed_still_works(migrated_conn, db_path):
 
     Nobody has claimed an account, and we're on loopback — the owner can read
     their own data on their own machine without inventing a login first.
+
+    Amended 2026-08-02: the §8.6 consent gate applies here too, so the first
+    request lands on /safety. That is a one-time screen, not a login — no
+    credentials are invented and the allowance is intact. See
+    ``test_the_open_local_owner_is_gated_too`` for why this case is not exempt.
     """
     migrated_conn.commit()
+    _ack_everyone(db_path)
     client = TestClient(create_app(_settings(db_path), bind_host="127.0.0.1"))
     assert client.get(f"/api/status?date={DAY}").status_code == 200
     assert client.get(f"/?date={DAY}").status_code == 200
@@ -87,7 +93,29 @@ def test_binding_a_network_address_once_claimed_is_allowed(migrated_conn, db_pat
 # ---- login / logout ---------------------------------------------------------
 
 
+def _ack_everyone(db_path) -> None:
+    """Pre-accept the §8.6 disclaimer for every account that exists.
+
+    These tests are about authentication and tenant isolation. The consent gate
+    sits in front of both and is tested on its own in
+    ``tests/test_disclaimer_gate.py``; here it would only add a click to every
+    case and hide what each one is actually asserting.
+    """
+    from coach.store import db as _db
+    from coach.store import disclaimer as D
+
+    conn = _db.connect(db_path)
+    try:
+        for row in conn.execute("SELECT id FROM app_user").fetchall():
+            if not D.has_acknowledged(conn, user_id=row["id"]):
+                D.acknowledge(conn, user_id=row["id"], user_agent="pytest")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _client(db_path, host="127.0.0.1") -> TestClient:
+    _ack_everyone(db_path)
     return TestClient(create_app(_settings(db_path), bind_host=host))
 
 
@@ -164,6 +192,10 @@ def test_invite_link_creates_an_account_and_signs_in(migrated_conn, db_path):
     assert client.get(f"/invite/{token}").status_code == 200
     r = client.post(f"/invite/{token}", data={"password": MEMBER_PW}, follow_redirects=False)
     assert r.status_code == 303
+    # A brand-new account has not accepted the §8.6 notice, so the API is closed
+    # to it until it does — the invite page's short notice is not the agreement.
+    assert client.get(f"/api/status?date={DAY}").status_code == 403
+    _ack_everyone(db_path)
     assert client.get(f"/api/status?date={DAY}").status_code == 200
 
 

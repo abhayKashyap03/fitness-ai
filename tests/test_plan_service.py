@@ -97,7 +97,7 @@ def test_backdate_without_a_trend_is_refused_rather_than_guessed(migrated_conn):
         set_active_plan(migrated_conn, today=TODAY, rate=-0.5, start_date="2020-01-01")
 
 
-def test_web_form_and_cli_produce_the_same_result(migrated_conn, db_path):
+def test_web_form_and_cli_produce_the_same_result(migrated_conn, db_path, acknowledged):
     """The two surfaces must be indistinguishable — that is the whole point."""
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

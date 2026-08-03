@@ -32,7 +32,8 @@ def settings(db_path):
 
 
 @pytest.fixture
-def client(migrated_conn, settings):
+def client(migrated_conn, settings, acknowledged):
+    """``acknowledged`` pre-accepts the §8.6 disclaimer — see conftest."""
     migrated_conn.commit()
     return TestClient(create_app(settings))
 
@@ -193,7 +194,7 @@ def test_doctor_reports_problems_without_credentials(client):
     assert schema["status"] == "ok"
 
 
-def test_doctor_never_exposes_a_secret(db_path, migrated_conn):
+def test_doctor_never_exposes_a_secret(db_path, migrated_conn, acknowledged):
     migrated_conn.commit()
     cfg = Settings(
         db_path=db_path,
@@ -203,6 +204,7 @@ def test_doctor_never_exposes_a_secret(db_path, migrated_conn):
         log_level="INFO",
         google_api_key="SUPER-SECRET-VALUE",
     )
+    acknowledged()  # §8.6 gate — see conftest; this test is about secret leakage
     body = TestClient(create_app(cfg)).get("/api/doctor").json()
     assert "SUPER-SECRET-VALUE" not in str(body)
     llm = next(c for c in body["checks"] if c["key"] == "llm")

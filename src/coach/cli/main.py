@@ -471,8 +471,22 @@ def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
         f"in={u.input_tokens} out={u.output_tokens} cached={u.cached_input_tokens}]",
         file=sys.stderr,
     )
+    _print_disclaimer()
     _record_spend(settings, provider, result, command="ask")
     return 0
+
+
+def _print_disclaimer() -> None:
+    """The §8.6 notice, on stderr beside the usage line.
+
+    stderr rather than stdout so piping an answer into another tool still yields
+    just the answer — the same split the token-usage line already uses. The
+    reader still sees it in an interactive terminal, which is where advice is
+    actually acted on.
+    """
+    from ..disclaimer import SHORT
+
+    print(f"[{SHORT}]", file=sys.stderr)
 
 
 def _record_spend(settings: Settings, provider: object, result: object, *, command: str) -> None:
@@ -979,6 +993,7 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         # otherwise a target the user just set is invisible for the ten days it
         # takes TDEE to become measurable.
         _print_protein(p)
+        _print_disclaimer()
         return 0
     st = p["status"]
     print(f"  measured TDEE:    {st['tdee_kcal']:.0f} kcal/day")
@@ -999,6 +1014,7 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         )
     for a in st["alerts"]:
         print(f"  ⚠ {a['message']}")
+    _print_disclaimer()
     return 0
 
 

@@ -20,8 +20,13 @@ DAY = "2026-03-15"
 
 
 @pytest.fixture
-def client(migrated_conn, db_path, monkeypatch):
-    """App wired to the migrated temp DB (settings injected — never the real one)."""
+def client(migrated_conn, db_path, acknowledged, monkeypatch):
+    """App wired to the migrated temp DB (settings injected — never the real one).
+
+    ``acknowledged`` pre-accepts the §8.6 disclaimer so these tests exercise
+    rendering rather than the consent gate; the gate itself is owned by
+    ``tests/test_disclaimer_gate.py``.
+    """
     from coach.config import Settings
 
     settings = Settings(
