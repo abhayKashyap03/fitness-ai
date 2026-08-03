@@ -13,12 +13,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..adapters.whoop.auth import ReauthRequired, TokenStore, WhoopOAuth
+from ..adapters.whoop.auth import ReauthRequired, WhoopOAuth
 from ..adapters.whoop.client import WhoopClient
 from ..adapters.whoop.ingest import ingest_whoop
 from ..config import ConfigError, Settings, load_settings
 from ..normalize.runner import normalize_all
-from ..paths import whoop_token_path
+from ..services.credentials import whoop_token_store
 from ..store import db
 
 
@@ -213,7 +213,7 @@ def _cmd_auth_whoop(settings: Settings, args: argparse.Namespace) -> int:
         settings.whoop_client_secret,
         settings.whoop_redirect_uri,
     )
-    store = TokenStore(whoop_token_path(settings.user_id))
+    store = whoop_token_store(settings)
     try:
         if args.headless:
             tokens = run_login_headless(oauth, store)
@@ -916,7 +916,7 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
     try:
         settings.require_whoop()
         print("  whoop creds:    configured")
-        store = TokenStore(whoop_token_path(settings.user_id))
+        store = whoop_token_store(settings)
         tokens = store.load() if store.exists() else None
         if tokens is None:
             problems += 1

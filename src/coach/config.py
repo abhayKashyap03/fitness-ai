@@ -39,6 +39,11 @@ class Settings:
     anthropic_api_key: str = field(default="", repr=False)
     google_api_key: str = field(default="", repr=False)
     xai_api_key: str = field(default="", repr=False)
+    # ADR-0018's AES-256-GCM key for `user_secret`. Its PRESENCE is also the
+    # switch that moves source credentials out of plaintext files and into the
+    # encrypted store (services/credentials.py) — deliberately not a separate
+    # flag, because a flag makes the secure path the one you have to remember.
+    secret_key: str = field(default="", repr=False)
     llm_provider: str = "google"  # 'google' (free tier) | 'anthropic' | 'grok'
     coach_model: str = ""  # empty -> provider default (see coach.coach.llm)
 
@@ -208,6 +213,7 @@ def load_settings(env: dict[str, str] | None = None, *, load_dotenv_file: bool =
         anthropic_api_key=_get(env, "ANTHROPIC_API_KEY", required=False),
         google_api_key=_get(env, "GOOGLE_API_KEY", required=False),
         xai_api_key=_get(env, "XAI_API_KEY", required=False),
+        secret_key=_get(env, "COACH_SECRET_KEY", required=False),
         llm_provider=provider,
         # empty -> the provider's own default model (coach.coach.llm)
         coach_model=_get(env, "COACH_MODEL", required=False),
