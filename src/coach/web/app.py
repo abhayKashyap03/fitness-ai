@@ -524,6 +524,92 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
             },
         )
 
+    # ---- food logging (P12) ----------------------------------------------
+    # Presentation only, like every other route here: the search, the parsing
+    # and the write all live in the adapter/normalizer/service the CLI uses, so
+    # the two surfaces cannot drift the way `plan set` once did.
+
+    def _food_search(query: str):
+        from ..adapters.foods.openfoodfacts import FoodSearchError, OpenFoodFactsClient
+        from ..normalize.foods import parse_openfoodfacts
+
+        client = OpenFoodFactsClient()
+        try:
+            if query.strip().isdigit():
+                product = client.by_barcode(query.strip())
+                raw = [product] if product else []
+            else:
+                raw = client.search(query, page_size=12)
+        except (FoodSearchError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        finally:
+            client.close()
+        return [i for i in (parse_openfoodfacts(p) for p in raw) if i is not None]
+
+    @app.get("/food", response_class=HTMLResponse)
+    def page_food(request: Request, q: str | None = Query(default=None)) -> Any:
+        # `results is None` means "no search run yet", distinct from an empty
+        # list meaning "searched, found nothing" (§2.7). The template renders
+        # them differently on purpose.
+        results = None
+        error = None
+        if q and q.strip():
+            try:
+                results = _food_search(q)
+            except HTTPException as exc:
+                error = str(exc.detail)
+        return templates.TemplateResponse(
+            request=request,
+            name="food.html",
+            context={"nav": "food", "query": q, "results": results, "error": error, "logged": None},
+        )
+
+    @app.post("/food", response_class=HTMLResponse, dependencies=[Depends(_same_origin)])
+    def submit_food(
+        request: Request, barcode: str = Form(...), grams: float = Form(...)
+    ) -> Any:
+        from ..adapters.foods.openfoodfacts import FoodSearchError, OpenFoodFactsClient
+        from ..normalize.foods import parse_openfoodfacts
+        from ..services.food_log import log_food
+
+        client = OpenFoodFactsClient()
+        try:
+            product = client.by_barcode(barcode)
+        except (FoodSearchError, ValueError) as exc:
+            product = None
+            error: str | None = str(exc)
+        else:
+            error = None
+        finally:
+            client.close()
+
+        item = parse_openfoodfacts(product) if product else None
+        logged = None
+        if item is None and error is None:
+            error = f"No usable nutrition data for barcode {barcode} — not logged."
+        elif item is not None:
+            with _conn() as conn:
+                logged = log_food(
+                    conn,
+                    item,
+                    grams=grams,
+                    day_key=_today(cfg),
+                    raw_payload=product or {},
+                    user_id=_uid(),
+                )
+                conn.commit()
+        return templates.TemplateResponse(
+            request=request,
+            name="food.html",
+            context={
+                "nav": "food",
+                "query": None,
+                "results": None,
+                "error": error,
+                "logged": logged,
+            },
+        )
+
     @app.get("/plan", response_class=HTMLResponse)
     def page_plan(request: Request) -> Any:
         day = _today(cfg)
