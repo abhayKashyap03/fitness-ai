@@ -1135,6 +1135,61 @@ def _cmd_food_log(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_exercise_log(settings: Settings, args: argparse.Namespace) -> int:
+    """Record a training session by hand (P12, own logging)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from ..services.exercise_log import log_exercise
+
+    day = args.date or _today(settings)
+    tz = ZoneInfo(settings.home_tz)
+    # A session with no stated clock time is anchored at noon local. Deliberate:
+    # midnight would sit on a day boundary and could land the session on the
+    # wrong physiological day under an offset (§2.6).
+    at = args.at or "12:00"
+    try:
+        local = datetime.fromisoformat(f"{day}T{at}").replace(tzinfo=tz)
+    except ValueError:
+        print(f"could not read {day!r} + {at!r} as a date and time", file=sys.stderr)
+        return 2
+    raw_offset = local.strftime("%z")
+    offset: str | None = f"{raw_offset[:3]}:{raw_offset[3:]}" if raw_offset else None
+
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        try:
+            logged = log_exercise(
+                conn,
+                sport=args.sport,
+                duration_s=int(args.minutes * 60),
+                started_at=local.isoformat(),
+                utc_offset=offset,
+                tz_name=settings.home_tz,
+                kcal=args.kcal,
+                distance_m=args.distance_m,
+                user_id=settings.user_id,
+            )
+            conn.commit()
+        except ValueError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+
+    kcal = f", {logged.kcal:.0f} kcal" if logged.kcal is not None else ""
+    mapped = (
+        "" if logged.sport_type == args.sport.lower() else f" (recorded as {logged.sport_type})"
+    )
+    print(f"Logged {logged.duration_s // 60} min {args.sport}{mapped} on {logged.day_key}{kcal}")
+    if logged.kcal is None:
+        # Absence stated plainly (§2.7): no estimate is invented, and the user
+        # should know the day's energy balance does not include this session.
+        print("  No calories recorded — pass --kcal if you want them counted.")
+    return 0
+
+
 def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     """One-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize.
 
@@ -1633,6 +1688,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_fl.add_argument("--grams", type=float, required=True, help="portion size in grams")
     p_fl.add_argument("--date", default=None, help="day_key (default: today)")
     p_fl.set_defaults(func=_cmd_food_log)
+
+    p_ex = sub.add_parser("exercise", help="log a training session by hand (P12)")
+    ex_sub = p_ex.add_subparsers(dest="exercise_command", required=True)
+    p_el = ex_sub.add_parser("log", help="record a session")
+    p_el.add_argument("sport", help="strength, run, cycle, walk, hiit, swim, rowing, yoga, sport")
+    p_el.add_argument("--minutes", type=float, required=True)
+    p_el.add_argument("--date", default=None, help="day_key (default: today)")
+    p_el.add_argument("--at", default=None, help="local start time HH:MM (default: 12:00)")
+    p_el.add_argument(
+        "--kcal",
+        type=float,
+        default=None,
+        help="calories, if you know them. NOT estimated — a duration and a sport "
+        "cannot give energy expenditure for a specific body (ADR-0007).",
+    )
+    p_el.add_argument("--distance-m", type=float, default=None, dest="distance_m")
+    p_el.set_defaults(func=_cmd_exercise_log)
 
     p_plan = sub.add_parser("plan", help="set / show the cut/bulk plan (ADR-0013)")
     plan_sub = p_plan.add_subparsers(dest="plan_command", required=True)

@@ -19,6 +19,7 @@ from ..store.canonical import (
     upsert_workout,
 )
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
+from .exercise import parse_exercise_log
 from .foods import parse_food_log
 from .healthkit import parse_body_record
 from .myfitnesspal import parse_diary, parse_exercise, parse_measurement
@@ -131,6 +132,19 @@ def normalize_all(
         upsert_recovery(conn, brow, raw_ref=r["id"], derived_at=derived_at)
         n_ble += 1
 
+    # Hand-logged exercise (P12). Same rule as own-logged food: `workout` is a
+    # raw-derived table the rebuild owns, so the raw event has to be sufficient
+    # to reproduce the row rather than merely record that it happened.
+    n_own_ex = 0
+    for r in conn.execute(
+        "SELECT id, payload FROM raw_events WHERE record_type='exercise_log'"
+    ).fetchall():
+        exrow = parse_exercise_log(json.loads(r["payload"]), user_id=user_id)
+        if exrow is None:
+            continue
+        upsert_workout(conn, exrow, raw_ref=r["id"], derived_at=derived_at)
+        n_own_ex += 1
+
     # Own-logged food (P12). These are USER-AUTHORED but still raw-derived: the
     # raw event holds the product AND the portion, so a rebuild reproduces the
     # canonical row exactly rather than losing the meal (§2.1).
@@ -177,6 +191,7 @@ def normalize_all(
         "recovery": n_rec,
         "recovery_ble": n_ble,
         "food_own": n_own_food,
+        "exercise_own": n_own_ex,
         "workout": n_wk,
         "sleep": n_slp,
         "weight": n_wt,
@@ -317,6 +332,16 @@ def _normalize_mfp_workout(conn: sqlite3.Connection, user_id: int, derived_at: s
             upsert_workout(conn, row, raw_ref=r["id"], derived_at=derived_at)
             n += 1
     return n
+
+
+def regroup_workouts(conn: sqlite3.Connection, tolerance_s: int = DEFAULT_TOLERANCE_S) -> int:
+    """Public alias — the write paths need this too, not just the rebuild.
+
+    A hand-logged session that leaves session_group_id unset produces different
+    canonical state from the same raw than a rebuild does, and until the next
+    normalize a workout the strap also caught would be counted twice (§5).
+    """
+    return _regroup_workouts(conn, tolerance_s)
 
 
 def _regroup_workouts(conn: sqlite3.Connection, tolerance_s: int) -> int:
