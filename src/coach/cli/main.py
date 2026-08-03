@@ -1002,6 +1002,50 @@ def _cmd_ble_probe(_settings: Settings, args: argparse.Namespace) -> int:
     return 0 if result.connected and result.family_5x else 1
 
 
+def _cmd_ble_record(settings: Settings, args: argparse.Namespace) -> int:
+    """Record a live HR session from the strap into raw_events (Adapter B).
+
+    Standard SIG Heart Rate only — no proprietary protocol. The RR intervals it
+    carries are what yield a textbook HRV figure, which is the objective
+    measurement the calibration play compares against WHOOP's own (§5).
+    """
+    try:
+        from ..adapters.whoop_ble.record import record_session, store_session
+    except ImportError:
+        print("BLE support needs the optional extra:  pip install -e '.[ble]'", file=sys.stderr)
+        return 2
+
+    seconds = args.minutes * 60.0
+    print(f"Recording from {args.address} for {args.minutes:.0f} min — keep the strap on.")
+    try:
+        session = record_session(args.address, seconds=seconds)
+    except Exception as exc:
+        print(f"BLE session failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    if session.errors:
+        # Surfaced, never swallowed: a confident HRV number computed from a
+        # silently thinned sample is worse than a smaller honest one.
+        print(f"  {len(session.errors)} unparseable frame(s) — kept in the raw payload")
+    print(f"  {session.beats} beat notification(s), {session.rr_count} RR interval(s)")
+    if session.rr_count == 0:
+        print(
+            "  No RR intervals in this session. Heart rate alone gives no HRV, so "
+            "this will normalize to a resting-HR row and nothing more."
+        )
+
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        row_id, inserted = store_session(conn, session, user_id=settings.user_id)
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"  raw_events: {'stored' if inserted else 'already present'} ({row_id})")
+    print("\nNext:  coach normalize   (then `coach eval calibration` once you have a few)")
+    return 0
+
+
 def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     """One-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize.
 
@@ -1476,6 +1520,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_bprobe.add_argument("address", help="address from `coach ble scan`")
     p_bprobe.add_argument("--timeout", type=float, default=20.0)
     p_bprobe.set_defaults(func=_cmd_ble_probe)
+    p_brec = ble_sub.add_parser(
+        "record", help="record a live HR session into raw_events (standard SIG HR; gives HRV)"
+    )
+    p_brec.add_argument("address", help="address from `coach ble scan`")
+    p_brec.add_argument(
+        "--minutes",
+        type=float,
+        default=5.0,
+        help="recording window (default 5). Longer is better for HRV: RMSSD needs a "
+        "few minutes of clean beats to mean anything.",
+    )
+    p_brec.set_defaults(func=_cmd_ble_record)
 
     p_plan = sub.add_parser("plan", help="set / show the cut/bulk plan (ADR-0013)")
     plan_sub = p_plan.add_subparsers(dest="plan_command", required=True)
