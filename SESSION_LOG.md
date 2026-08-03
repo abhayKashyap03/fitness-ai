@@ -200,6 +200,84 @@ start** — LAN phone access breaks until `coach user set-password` is run.
 
 ---
 
+## Session 2026-08-02 (d) — hosting prerequisites: everything except the credit card (PR #31)
+
+Asked to take the project to the finish in one run. **It cannot be** — and the
+reasons are structural, not effort: buying a VPS and registering a domain are
+purchases; the BLE spike needs a radio talking to the strap; P9's recovery
+engine is pre-registered to n=150 HRV days (72 today) and building it now would
+destroy the pre-registration decided the same day; App Store and legal review
+are the human's. So the work taken was the slice that is needed under **every**
+branch: everything ADR-0019's hosting plan requires that does not need a card.
+
+Four commits on `feat/medical-disclaimers`, stacked on #30.
+
+**1. Medical disclaimer on every advice surface** —
+[ADR-0020](docs/adr/0020-medical-disclaimer.md), migration 0015. Discharges
+ADR-0018's prerequisite. Only the invite form carried a notice; the dashboard,
+plan page and coach chat carried nothing. One canonical text now feeds the web
+UI, the CLI and the model's `SYSTEM_PROMPT`, so the user and the model are
+provably held to the same scope — this repo has shipped the
+same-logic-in-two-places bug twice already, and here it would be invisible from
+both sides. Acknowledgement is **recorded and versioned**; a footer nobody reads
+is the failure the auth work already rejected. Gate lives in the middleware,
+covers `/api/`, and leaves `/logout` reachable — a gate you cannot retreat from
+is a trap. **Applies to open-local too**: that allowance is about credentials,
+this is about advice.
+
+**2. Rehearsed restore** — `coach db rehearse-restore` (destroys nothing, safe
+on cron) and `coach db restore --yes`. ADR-0019 §5 demanded a rehearsal and
+there was nothing to rehearse with. The real restore verifies the snapshot
+**before** touching anything and **preserves** the database it replaces (§8.5).
+A stale backup is reported as a *delta*, not a failure — calling a
+behind-by-a-day backup broken trains you to ignore the check.
+
+**3. Headless WHOOP OAuth** — `coach auth whoop --headless`. `run_login` opens
+a browser and binds a local socket; neither exists on a VPS. Both flows share
+one `_exchange()`, because a headless path that forgot the state check would be
+a real vulnerability no test of the laptop path would catch. A bare code is
+refused: state is the only proof the code came from the login you started.
+
+**4. Cron-ready sync + deploy artifacts + runbook** — Caddyfile, systemd unit
+(loopback-bound, hardened), cron file, a laptop-side `pull-backup.sh` that
+**pulls** so the host holds no credential that can write to the archive, and
+[docs/DEPLOY.md](docs/DEPLOY.md) in ADR-0019's forced order.
+
+### Two real bugs, both found by running it rather than by a test
+- **`run_sync` conflated "not configured" with "auth needed"** and always exited
+  0. Moved to cron, a revoked token would ingest nothing every night while the
+  job reported success every night — a silent failure with no upper bound.
+  `needs_attention` now separates them and sync exits 1.
+- **`--quiet` was not quiet.** It suppressed the command's own output and then
+  printed fifteen httpx INFO lines — a nightly email about nothing, which is how
+  a real failure ends up filtered away unread.
+
+Also fixed: both restore commands raised a raw `sqlite3` traceback on a corrupt
+snapshot. Data was intact, but a stack trace mid-incident does not answer the
+only question that matters ("did my live database survive?").
+
+**724 green (+56); ruff + mypy clean.** Live-verified against the real DB and
+real APIs: disclaimer gate end to end; rehearsal against a real snapshot (2402
+raw_events, fingerprint identical) and a full restore drilled into a scratch
+target; `coach sync --quiet` silent, exit 0.
+
+⚠️ **The live database is now at v15** — that sync applied migration 0015
+(additive, forward-only). The web app will therefore ask you to accept the
+safety notice once.
+
+**Two existing tests were changed, not deleted** (§6.2), both behaviourally:
+`test_localhost_with_no_account_claimed_still_works` acknowledges first, and
+`test_invite_link_creates_an_account_and_signs_in` now asserts a new account
+gets 403 until it accepts.
+
+### Still needs the human
+- **VPS + domain** — purchases; not something I can do.
+- **Owner password** — `coach web --host 0.0.0.0` refuses to start without one.
+- **BLE spike** — `bleak` signed off and the strap is worn daily, but the
+  acceptance gate is empirical and wants someone at the keyboard.
+
+---
+
 ## Where the code stands (verified 2026-08-02)
 
 - **668 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).

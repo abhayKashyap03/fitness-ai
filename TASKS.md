@@ -9,8 +9,14 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ## ▶ NEXT UP (start here — updated 2026-08-02)
 
-State: **suite green · ruff + mypy clean · schema v14 · PRs #12–#29 merged; #30
-(web auth) open for review.**
+State: **724 tests green · ruff + mypy clean · schema v15 · PRs #12–#29 merged;
+#30 (web auth) and #31 (hosting prerequisites) open for review.**
+
+**#31 delivers every hosting prerequisite that does not need a purchase**:
+medical disclaimers (ADR-0020, migration 0015), `coach db rehearse-restore` +
+`restore`, `coach auth whoop --headless`, cron-ready `coach sync --quiet` with a
+truthful exit code, and `deploy/` + [docs/DEPLOY.md](docs/DEPLOY.md). Follow the
+runbook once a VPS exists.
 
 **Read [ADR-0019](docs/adr/0019-hosting-the-owners-instance.md) before planning
 any hosting work.** It amends ADR-0018: the hosted instance is **the owner's
@@ -29,11 +35,11 @@ Near-term, in priority order:
    and **no password**. Once #30 merges, `coach web --host 0.0.0.0` **refuses to
    start** without one — phone access over the LAN breaks until it is set.
    `coach user set-password` (prompts, no echo, no flag).
-2. **Hosting, in the order ADR-0019 forces:** VPS → domain → TLS → headless
-   OAuth → migrate → cron sync → **rehearse restore**. Domain + TLS are
-   prerequisites, not polish (WHOOP is authorised on the host at
-   `https://<domain>/callback`). Blocking sub-item: `run_login` opens a browser
-   and binds a local `HTTPServer` — **it cannot run headless**, a variant is needed.
+2. **🧑 Buy the VPS and register the domain**, then work
+   [docs/DEPLOY.md](docs/DEPLOY.md) top to bottom. Everything else in the chain
+   is built and tested (#31): headless OAuth, restore + rehearsal, cron sync,
+   proxy/systemd/cron artifacts. Step 9 makes you drill a real restore by hand
+   while nothing is wrong — do not skip it.
 3. **BLE spike (Adapter B)** — the subscription-survival play, and the membership
    clock is running (recon 2026-07-25 said ~9 months). **Not blocked on hardware**
    — the strap is worn daily. Blocked only on doing it, plus `bleak` needing §6.4
