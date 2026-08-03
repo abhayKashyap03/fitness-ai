@@ -380,3 +380,42 @@ def test_password_forms_advertise_the_real_minimum(migrated_conn, db_path):
     for body in (invite_body, account_body):
         assert f'minlength="{MIN_PASSWORD_LEN}"' in body
         assert f"At least {MIN_PASSWORD_LEN} characters" in body
+
+
+def test_a_member_can_reach_their_own_account_page(migrated_conn, db_path):
+    """The Account tab was owner-gated in the nav, so a member had no route to
+    their own password. On a hosted box they have no CLI either — that left them
+    with no way to change it at all."""
+    _claim_owner(migrated_conn)
+    _add_member(migrated_conn)
+    client = _signed_in(db_path, email="friend@example.test", password=MEMBER_PW)
+    body = client.get("/").text
+    assert 'href="/account"' in body, "members need the Account tab in the nav"
+    r = client.get("/account")
+    assert r.status_code == 200
+    assert "friend@example.test" in r.text
+    assert "Change password" in r.text
+
+
+def test_a_member_can_actually_change_their_password(migrated_conn, db_path):
+    _claim_owner(migrated_conn)
+    _add_member(migrated_conn)
+    client = _signed_in(db_path, email="friend@example.test", password=MEMBER_PW)
+    r = client.post(
+        "/account/password",
+        data={"current": MEMBER_PW, "new": "a brand new member password"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    fresh = _signed_in(db_path, email="friend@example.test", password="a brand new member password")
+    assert fresh.get("/account").status_code == 200
+
+
+def test_a_member_sees_no_owner_only_controls(migrated_conn, db_path):
+    """Ungating the tab must not ungate what is behind it."""
+    _claim_owner(migrated_conn)
+    _add_member(migrated_conn)
+    body = _signed_in(db_path, email="friend@example.test", password=MEMBER_PW).get("/account").text
+    assert "Create invite link" not in body
+    assert "Invite someone" not in body
+    assert "owner@example.test" not in body
