@@ -110,7 +110,7 @@ def _instant(value: object) -> str | None:
 
     try:
         return to_utc_iso(parse_instant(value.strip()))
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return None
 
 

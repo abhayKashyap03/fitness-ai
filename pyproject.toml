@@ -64,7 +64,14 @@ coach = ["web/templates/*.html"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-target-version = "py314"
+# MUST match requires-python, not the dev interpreter. CLAUDE.md §3 permits
+# tracking the dev interpreter here, but that permission predates a real
+# consequence: at py314 the FORMATTER rewrites `except (A, B):` into PEP 758's
+# unparenthesized `except A, B:`, which is a SyntaxError on 3.11-3.13. The
+# package then installs on those versions (metadata allows it) and fails at
+# import. Two such lines had already shipped. Portability is what the floor is
+# for, so the floor is what this tracks.
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

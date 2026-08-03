@@ -1046,6 +1046,95 @@ def _cmd_ble_record(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _food_client():
+    from ..adapters.foods.openfoodfacts import OpenFoodFactsClient
+
+    return OpenFoodFactsClient()
+
+
+def _cmd_food_search(_settings: Settings, args: argparse.Namespace) -> int:
+    """Search Open Food Facts by name or barcode (ROADMAP P12)."""
+    from ..adapters.foods.openfoodfacts import FoodSearchError
+    from ..normalize.foods import parse_openfoodfacts
+
+    client = _food_client()
+    try:
+        if args.query.strip().isdigit():
+            product = client.by_barcode(args.query.strip())
+            products = [product] if product else []
+        else:
+            products = client.search(args.query, page_size=args.limit)
+    except FoodSearchError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+    items = [i for i in (parse_openfoodfacts(p) for p in products) if i is not None]
+    if not items:
+        # Absence, stated as absence (§2.7). Products with no usable nutrition
+        # are filtered above, so say that rather than implying nothing matched.
+        print(f"No usable products for {args.query!r}.")
+        if products:
+            print(f"  ({len(products)} matched but carried no nutrition data)")
+        return 1
+
+    for i in items:
+        kcal = f"{i.kcal_per_100g:.0f}" if i.kcal_per_100g is not None else "?"
+        srv = f"  serving {i.serving_g:g} g" if i.serving_g else ""
+        print(f"  {i.external_id}  {kcal:>4} kcal/100g  {i.display}{srv}")
+    print(f"\n{len(items)} result(s).  Log one:  coach food log <barcode> --grams 100")
+    return 0
+
+
+def _cmd_food_log(settings: Settings, args: argparse.Namespace) -> int:
+    """Look a product up by barcode and record a portion of it."""
+    from ..adapters.foods.openfoodfacts import FoodSearchError
+    from ..normalize.foods import parse_openfoodfacts
+    from ..services.food_log import log_food
+
+    client = _food_client()
+    try:
+        product = client.by_barcode(args.barcode)
+    except (FoodSearchError, ValueError) as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+    if product is None:
+        print(f"No product with barcode {args.barcode}.", file=sys.stderr)
+        return 1
+    item = parse_openfoodfacts(product)
+    if item is None:
+        print(
+            f"Product {args.barcode} has no usable nutrition data — refusing to log "
+            "an entry with unknown calories.",
+            file=sys.stderr,
+        )
+        return 1
+
+    day = args.date or _today(settings)
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        logged = log_food(
+            conn,
+            item,
+            grams=args.grams,
+            day_key=day,
+            raw_payload=product,
+            user_id=settings.user_id,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    kcal = f"{logged.kcal:.0f} kcal" if logged.kcal is not None else "kcal unknown"
+    print(f"Logged {logged.grams:g} g {logged.description} on {day} — {kcal}")
+    return 0
+
+
 def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     """One-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize.
 
@@ -1532,6 +1621,18 @@ def build_parser() -> argparse.ArgumentParser:
         "few minutes of clean beats to mean anything.",
     )
     p_brec.set_defaults(func=_cmd_ble_record)
+
+    p_food = sub.add_parser("food", help="search and log food from Open Food Facts (P12)")
+    food_sub = p_food.add_subparsers(dest="food_command", required=True)
+    p_fs = food_sub.add_parser("search", help="search by product name, or look up a barcode")
+    p_fs.add_argument("query", help="product name, or a barcode (digits only)")
+    p_fs.add_argument("--limit", type=int, default=10)
+    p_fs.set_defaults(func=_cmd_food_search)
+    p_fl = food_sub.add_parser("log", help="record a portion of a product by barcode")
+    p_fl.add_argument("barcode")
+    p_fl.add_argument("--grams", type=float, required=True, help="portion size in grams")
+    p_fl.add_argument("--date", default=None, help="day_key (default: today)")
+    p_fl.set_defaults(func=_cmd_food_log)
 
     p_plan = sub.add_parser("plan", help="set / show the cut/bulk plan (ADR-0013)")
     plan_sub = p_plan.add_subparsers(dest="plan_command", required=True)
