@@ -199,8 +199,9 @@ def _cmd_db_verify(settings: Settings, _args: argparse.Namespace) -> int:
 # ---- auth subcommands ------------------------------------------------------
 
 
-def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
-    from ..adapters.whoop.flow import run_login  # local: touches browser/socket
+def _cmd_auth_whoop(settings: Settings, args: argparse.Namespace) -> int:
+    # local import: touches browser/socket/stdin
+    from ..adapters.whoop.flow import run_login, run_login_headless
 
     try:
         settings.require_whoop()
@@ -214,7 +215,10 @@ def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
     )
     store = TokenStore(whoop_token_path(settings.user_id))
     try:
-        tokens = run_login(oauth, store, settings.whoop_redirect_uri)
+        if args.headless:
+            tokens = run_login_headless(oauth, store)
+        else:
+            tokens = run_login(oauth, store, settings.whoop_redirect_uri)
     except (ReauthRequired, RuntimeError) as exc:
         print(f"WHOOP authorization failed: {exc}", file=sys.stderr)
         return 1
@@ -1245,6 +1249,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_auth = sub.add_parser("auth", help="authorize a data source")
     auth_sub = p_auth.add_subparsers(dest="auth_command", required=True)
     p_whoop = auth_sub.add_parser("whoop", help="run the WHOOP OAuth login")
+    p_whoop.add_argument(
+        "--headless",
+        action="store_true",
+        help=(
+            "no browser, no listening socket: print the URL and paste the redirect "
+            "back. Use this on a host (ADR-0019) — the default flow needs a desktop "
+            "browser and binds the redirect's port locally."
+        ),
+    )
     p_whoop.set_defaults(func=_cmd_auth_whoop)
 
     p_ingest = sub.add_parser("ingest", help="fetch a source into raw_events")
