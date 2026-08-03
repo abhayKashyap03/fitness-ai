@@ -51,11 +51,27 @@ The eventual product is a **native iOS (SwiftUI) app + multi-tenant backend**.
 
 ## P8 — Subscription survival (BLE Adapter B)
 
-The post-membership path; the biggest open item. ADR-0012.
+The post-membership path. **ADR-0012 ACCEPTED 2026-08-03 — the hardware gate passed.**
 
-- **[Next Up · P0]** BLE spike — confirm 5.0 **MG** local read on the actual strap (Bleak, `fd4b` family; whoop-vault reference). _Depends: physical strap._
-- **[Blocked]** Historical drain → `raw_events` (`source='whoop_ble'`, append-only, time-sliced). _Depends: spike._
-- **[Blocked]** Recompute objective metrics from raw (HRV/HR/SpO2/skin-temp; `is_official=0`). _Depends: drain._
+- **[Done · P0]** **BLE spike PASSED 2026-08-03** on the owner's own MG strap. ADR-0012 is
+  ACCEPTED and risk #1 is retired. `fd4b0001` present (chars `0002-0005`, `0007` — **no
+  `0006`**, unlike whoop-vault's r52 Maverick), plus standard SIG **Heart Rate**
+  `180d`/`2a37`, Battery and Device Info. Scrubbed GATT enumeration kept as a baseline
+  fixture, because firmware churn is the standing threat and the only way to notice it is
+  to have written down what working looked like.
+- **[Done]** **Live HR ingest** (`coach ble record`) → `raw_events` (`source='whoop_ble'`).
+  Standard SIG `2a37` carries **RR intervals**, so textbook HRV needs no reverse
+  engineering at all — a durable path WHOOP cannot break without breaking every generic
+  HR app. One raw event per session, original frame hex retained (§2.1).
+- **[Next Up]** Historical drain → `raw_events` (append-only, time-sliced). Richer than
+  live HR; the ~14-day on-strap buffer makes the time-sliced calibration lossless.
+  **Must not assume `fd4b0006`** — this MG does not expose it. Untested on
+  macOS/CoreBluetooth (whoop-vault is Linux/BlueZ only). _Depends: nothing — unblocked._
+- **[Done]** **Recompute objective metrics from raw** — `hrv_rmssd_ms` (textbook RMSSD)
+  and resting HR from standard SIG Heart Rate `2a37`, written as `whoop_ble` sibling rows
+  with `score_method='textbook'`/`is_official=0`. No composite score is emitted:
+  WHOOP's weighting is proprietary and a lookalike number in the same column would be a
+  fabrication. SpO2/skin-temp still need the `fd4b` drain.
 - **[Done]** `coach eval calibration` wired — and it no longer waits on `whoop_ble`.
   A weight assembler was added so the machinery runs on today's sibling sources
   (scale-via-Apple-Health vs MFP), exercising the calibration path before Adapter B
@@ -139,9 +155,14 @@ Lifts §11's no-server / no-multi-tenancy for real.
 
 ## P12 — Own food logging (product food source) · epics
 
-- **[Backlog · EPIC · P1]** In-app food logging — replaces MFP for the product (§12-intended path).
-- **[Backlog]** USDA FoodData Central + Open Food Facts integration (adapter-bounded). _Depends: epic._
-- **[Backlog]** Food search + barcode scan (low friction = survival, risk #8). _Depends: USDA+OFF._
+- **[In Progress · EPIC · P1]** In-app food logging — replaces MFP for the product (§12-intended path).
+- **[Done]** **Open Food Facts** integration (adapter-bounded, free, no key). `coach food
+  search|log` + a Food page in the dashboard. Unknown macros stay NULL through parsing,
+  scaling and storage — defaulting them to 0 would under-report intake in exactly the
+  direction self-reporting is already biased (risk #7). Live-verified against the real API.
+- **[Next Up]** **USDA FoodData Central** — a clean seam beside the OFF adapter; needs a
+  free API key. OFF covers barcoded packaged food; USDA is what covers raw ingredients.
+- **[Done]** Food search + barcode lookup (low friction = survival, risk #8).
 - **[Backlog]** In-app exercise logging.
 - **[Backlog]** One-time migrate personal MFP history → own store. _Depends: own logging._
 

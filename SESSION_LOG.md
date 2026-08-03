@@ -278,6 +278,73 @@ gets 403 until it accepts.
 
 ---
 
+## Session 2026-08-03 (b) — Adapter B ingest, encrypted credentials, own food logging
+
+Continued straight through after the gate passed. Four more commits.
+
+**BLE live-HR ingest (`coach ble record`).** The gate turned up something better
+than the plan assumed: standard SIG Heart Rate (`180d`/`2a37`) carries **RR
+intervals**, and RR intervals are what HRV is computed from. So a textbook
+`hrv_rmssd_ms` is available from an independent instrument with **no reverse
+engineering at all** — 2a37 is a public spec WHOOP cannot quietly change without
+breaking every generic HR app. That is §5's "objective measurement, comparable
+across sources" arriving from Adapter B, which is the whole calibration play.
+Writes `whoop_ble` sibling rows; wired into `normalize_all` so `--rebuild`
+covers it.
+- **No composite score is emitted, deliberately.** A "textbook recovery score"
+  in the same column would look like WHOOP's number and not be it. `score` is
+  NULL; `score_method='textbook'`, `is_official=0`.
+- Care where a wrong answer looks plausible: RR arrives in **1/1024 s ticks**
+  (treating them as ms scales every HRV figure by 2.4% and nothing looks
+  broken); energy-expended sits *between* HR and the RR block; artefacts are
+  filtered *before* the sufficiency check; thin data yields None, not a small
+  number. +25 tests, byte-level against the SIG layout.
+- ⚠️ **Not live-verified.** Recording needs the radio and this agent's process
+  is still refused Bluetooth by macOS TCC — the grant reached the human's own
+  Terminal, not the agent's. Parser, HRV math and normalizer are covered
+  offline; the notification subscription itself is unproven.
+
+**Credentials into the encrypted store** (`services/credentials.py`). ADR-0018
+built `user_secret` and nothing was wired to it. The rule: **if
+`COACH_SECRET_KEY` is configured, the database wins** — not a flag, because a
+flag makes the secure path the one you have to remember. Migration **moves**: an
+existing file is adopted on first load, then renamed aside (never deleted, §8.5).
+Once the DB holds a value it wins outright, so a stale file cannot override a
+rotated token.
+
+**Own food logging on Open Food Facts (P12).** The sanctioned nutrition path —
+MFP is a personal-only override (ADR-0010) that must never ship. `coach food
+search|log` plus a **Food page in the dashboard**, because logging from a CLI
+over SSH is not a food-logging feature (risk #8). The 0002 schema already listed
+`openfoodfacts` as a valid source, so no migration.
+- The dominant risk is **unknown macros silently becoming zero**. Crowd-sourced
+  products are half-filled, and defaulting fibre to 0.0 under-reports intake in
+  exactly the direction self-reporting is already biased (risk #7). Unknown
+  stays None through parsing, scaling and into a NULL column.
+- Live-verified against the real API: Nutella logged with `protein=1.9,
+  fiber=NULL` beside Coke with `protein=0.0`. **Those two zeros mean different
+  things**, and both survive to the day total.
+- **USDA FoodData Central is a clean seam, not built** — one vertical slice
+  beats two half-built ones (§3), and it needs an API key this install lacks.
+
+### A pre-existing portability bug, found on the way
+`ruff`'s `target-version` was `py314` while `requires-python` is `>=3.11`. At
+py314 the **formatter rewrites** `except (A, B):` into PEP 758's unparenthesized
+`except A, B:` — a **SyntaxError on 3.11–3.13**. Two such lines had already
+shipped (`normalize/myfitnesspal.py:113` predates this session). The package
+installs on those versions, because the metadata allows it, and then fails at
+import. Both fixed; `target-version` now tracks the floor.
+
+⚠️ **This deviates from a written decision.** CLAUDE.md §3 explicitly permits
+ruff's `target-version` to track the dev interpreter. That permission predates
+this consequence, and the decision's own rationale is portability — which the
+py314 setting was undoing. Flagged rather than done quietly; revert if you
+disagree.
+
+**784 green; ruff + mypy clean.** All on `feat/medical-disclaimers` → PR #31.
+
+---
+
 ## Session 2026-08-03 — the BLE gate PASSED on the real MG strap 🎉
 
 **The project's single biggest technical risk (§10.1) is retired.** ADR-0012's
