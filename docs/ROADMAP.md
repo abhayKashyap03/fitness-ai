@@ -163,8 +163,12 @@ Lifts §11's no-server / no-multi-tenancy for real.
 - **[Next Up]** **USDA FoodData Central** — a clean seam beside the OFF adapter; needs a
   free API key. OFF covers barcoded packaged food; USDA is what covers raw ingredients.
 - **[Done]** Food search + barcode lookup (low friction = survival, risk #8).
-- **[Backlog]** In-app exercise logging.
-- **[Backlog]** One-time migrate personal MFP history → own store. _Depends: own logging._
+- **[Done]** In-app exercise logging — `coach exercise log` + the web Log page. No
+  calorie estimate is ever invented (ADR-0007) and `strain` is never synthesised
+  (ADR-0015); unknown sports become `other` rather than being rejected, with the user's
+  own word kept in `source_sport_raw`.
+- **[Next Up]** One-time migrate personal MFP history → own store. _Depends: own logging —
+  now unblocked._
 
 ## P13 — iOS app (SwiftUI) · epics
 

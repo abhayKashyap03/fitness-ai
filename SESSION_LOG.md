@@ -278,6 +278,61 @@ gets 403 until it accepts.
 
 ---
 
+## Session 2026-08-03 (c) — own logging completed; two rebuild bugs; what is NOT done
+
+### The §2.1 bug, and its twin
+
+**Own-logged food did not survive `normalize --rebuild`.** The raw event stored
+only the *product*, so the portion size existed nowhere in raw — a rebuild
+dropped every logged meal and could not bring one back. `raw_events` was intact
+throughout, so nothing was permanently lost, but §2.1's rule is that canonical is
+**fully regenerable**, and it was not. Found by running a rebuild, not by a test.
+
+The fix reframes what the raw event *is*: the **logging act** (product + grams +
+day + time), not the encyclopaedia entry it referenced. `parse_food_log()`
+reproduces the row; the runner re-derives it. Fingerprint now identical across a
+rebuild, asserted by a test.
+
+**The twin, caught by that same assertion** while building exercise logging: the
+write path left `session_group_id` unset while the rebuild assigned it, so the
+two produced different canonical state from identical raw. It mattered
+independently too — a hand-logged session for a workout the strap also caught
+would be **counted twice** (§5's expected bug class) until the next normalize.
+`regroup_workouts` is now public and both paths call it.
+
+**The distinction worth carrying forward:** `plan` and `coach_note` are genuinely
+user-authored — no `raw_ref`, absent from the rebuild. `food_entry` and `workout`
+are **raw-derived tables the rebuild owns**. Anything landing in them needs a raw
+event sufficient to rebuild from. Food got this wrong because it *felt*
+user-authored.
+
+### Shipped
+- **In-app exercise logging** — `coach exercise log`, plus the web form. Written
+  rebuild-safe from the start; the rebuild test was the first check written.
+  **No calorie estimate is ever invented** (ADR-0007) and `strain` is never
+  synthesised (ADR-0015). Unknown sports become `other` rather than being
+  rejected, with the user's own word kept in `source_sport_raw`.
+- **Web Log page** — food search/log and training in one place, so own logging
+  works from a phone (risk #8).
+
+### What is NOT done — the honest list
+The instruction was to finish the whole app. It is not finished. Blocked, with
+the blocker verified rather than assumed:
+
+| | Why |
+|---|---|
+| **P13 iOS app** | **Xcode is not installed** — only CommandLineTools, and `xcodebuild` errors out. No simulators. Swift could be written but not compiled, run, or verified. ~7 GB App Store install, human-only. |
+| **BLE historical drain** | Writable, **not verifiable**. Reconstructing a CRC16/CRC32 framed protocol with a handshake from a one-paragraph ADR summary, with no way to test against the strap, produces code that looks finished and probably isn't. Also: **`fd4b0006` is absent on MG**. |
+| **`coach ble record` live** | macOS TCC refuses the agent's process; the grant reached the human's own terminal. |
+| **USDA FoodData Central** | Needs a free API key this install does not have. Clean seam exists beside the OFF adapter. |
+| **VPS + domain** | Purchases. Everything downstream is built (`docs/DEPLOY.md`). |
+| **P14 launch** | App Store account, legal review. |
+| **P9 recovery engine** | Correctly gated at the pre-registered n=150 HRV days (72 today) — building it now would destroy the pre-registration. |
+
+**800 green; ruff + mypy clean.** 19 commits on `feat/medical-disclaimers` → PR #31.
+
+---
+
 ## Session 2026-08-03 (b) — Adapter B ingest, encrypted credentials, own food logging
 
 Continued straight through after the gate passed. Four more commits.

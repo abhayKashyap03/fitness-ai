@@ -9,7 +9,7 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ## ▶ NEXT UP (start here — updated 2026-08-02)
 
-State: **784 tests green · ruff + mypy clean · schema v15 · PRs #12–#29 merged;
+State: **800 tests green · ruff + mypy clean · schema v15 · PRs #12–#29 merged;
 #30 (web auth) and #31 (hosting + BLE + food) open for review.**
 
 **🎉 The BLE gate PASSED on the real MG strap (2026-08-03).** ADR-0012 is
