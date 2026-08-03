@@ -1,7 +1,29 @@
 # ADR-0012 — Adapter B (local BLE) approach for WHOOP 5.0 MG
 
 **Status:** Proposed (2026-07-25) — recon complete; final acceptance gated on a
-hardware test against the user's own strap. No BLE code ships from this ADR.
+hardware test against the user's own strap.
+
+**Update 2026-08-02 — the spike tooling exists; the gate is still unanswered,
+and the blocker has changed.** `coach ble scan` / `coach ble probe` are built
+(`adapters/whoop_ble/discover.py`, `bleak` behind the optional `[ble]` extra,
+§6.4 signed off). No ingest code ships, per §4 below.
+
+Two blockers have now been *disproved*, and one real one found:
+
+- ~~"needs the physical strap"~~ — false since the project began; it is worn
+  daily. Corrected 2026-08-02.
+- ~~"needs a `bleak` dependency decision"~~ — signed off 2026-08-02.
+- **REAL, and verified by running it: macOS refuses the process Bluetooth
+  access.** `BleakScanner.discover()` dies with **SIGABRT (exit 134)** and no
+  Python-level exception — CoreBluetooth calls `abort()` when the host
+  application has not been granted Bluetooth permission. Reproduced both inside
+  and outside the tool sandbox, so it is TCC, not sandboxing. The host
+  application here is the one running the agent, and granting it is a **system
+  privacy setting only the human can change** (§8.1). Until that grant exists,
+  the gate cannot be attempted from this environment at all.
+
+The gate itself is unchanged and remains the acceptance test: does the user's
+own MG strap expose an `fd4b0001` service.
 
 ## Context
 

@@ -946,6 +946,62 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
     return 0 if problems == 0 else 1
 
 
+def _cmd_ble_scan(_settings: Settings, args: argparse.Namespace) -> int:
+    """List nearby BLE devices, most-likely-WHOOP first (ADR-0012 spike)."""
+    try:
+        from ..adapters.whoop_ble.discover import scan
+    except ImportError:
+        print("BLE support needs the optional extra:  pip install -e '.[ble]'", file=sys.stderr)
+        return 2
+
+    print(f"Scanning for {args.seconds:.0f}s… (the strap must be worn or recently moved)")
+    found = scan(args.seconds)
+    if not found:
+        print(
+            "No BLE devices seen at all — is Bluetooth on, and is this terminal allowed to use it?"
+        )
+        return 1
+
+    likely = [c for c in found if c.likely_whoop]
+    for c in found:
+        mark = "★" if c.likely_whoop else " "
+        rssi = f"{c.rssi:>4} dBm" if c.rssi is not None else "   ? dBm"
+        print(f" {mark} {c.address}  {rssi}  {c.name or '(no name)'}")
+        if c.likely_whoop:
+            print(f"      {c.why}")
+    print(f"\n{len(found)} device(s); {len(likely)} look like a WHOOP.")
+    if not likely:
+        # Say what to do next rather than just reporting nothing. A strap that
+        # is bonded to the phone may not advertise while that connection holds.
+        print(
+            "\nNo candidates. Worth trying: put the phone's Bluetooth OFF (the strap "
+            "holds one bond at a time), move the strap, and rescan."
+        )
+        return 1
+    print(f"\nNext:  coach ble probe {likely[0].address}")
+    return 0
+
+
+def _cmd_ble_probe(_settings: Settings, args: argparse.Namespace) -> int:
+    """Connect and enumerate GATT — ADR-0012's acceptance gate."""
+    try:
+        from ..adapters.whoop_ble.discover import probe
+    except ImportError:
+        print("BLE support needs the optional extra:  pip install -e '.[ble]'", file=sys.stderr)
+        return 2
+
+    print(f"Connecting to {args.address}… (may prompt to pair)")
+    result = probe(args.address, timeout=args.timeout)
+    if result.connected:
+        for uuid, chars in sorted(result.services.items()):
+            print(f"  {uuid}")
+            for c in chars:
+                print(f"      {c}")
+        print(f"\n{len(result.services)} service(s).")
+    print(f"\n{result.verdict}")
+    return 0 if result.connected and result.family_5x else 1
+
+
 def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     """One-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize.
 
@@ -1406,6 +1462,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_sync.set_defaults(func=_cmd_sync)
+
+    p_ble = sub.add_parser(
+        "ble", help="local Bluetooth read of the WHOOP strap (ADR-0012 spike; needs [ble])"
+    )
+    ble_sub = p_ble.add_subparsers(dest="ble_command", required=True)
+    p_bscan = ble_sub.add_parser("scan", help="list nearby BLE devices, likely-WHOOP first")
+    p_bscan.add_argument("--seconds", type=float, default=8.0, help="scan duration (default 8)")
+    p_bscan.set_defaults(func=_cmd_ble_scan)
+    p_bprobe = ble_sub.add_parser(
+        "probe", help="connect and enumerate GATT services (read-only; the ADR-0012 gate)"
+    )
+    p_bprobe.add_argument("address", help="address from `coach ble scan`")
+    p_bprobe.add_argument("--timeout", type=float, default=20.0)
+    p_bprobe.set_defaults(func=_cmd_ble_probe)
 
     p_plan = sub.add_parser("plan", help="set / show the cut/bulk plan (ADR-0013)")
     plan_sub = p_plan.add_subparsers(dest="plan_command", required=True)

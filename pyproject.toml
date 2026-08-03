@@ -29,6 +29,13 @@ web = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",  # FastAPI's required backend for HTML form posts
 ]
+# Local Bluetooth read of the WHOOP strap — Adapter B (ADR-0012), the
+# post-membership survival path. Optional on purpose: it pulls a platform BLE
+# stack that most users of the CLI have no need for, and nothing in the core
+# import path touches it. Signed off 2026-08-02 per §6.4.
+ble = [
+    "bleak>=0.22",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
