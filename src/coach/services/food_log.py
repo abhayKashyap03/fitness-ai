@@ -7,9 +7,17 @@ their history.
 
 The write is two rows, in the order §2.1 requires:
 
-1. the **verbatim product payload** into ``raw_events``, so the entry can be
-   re-derived if the parser improves;
+1. the **logging act** into ``raw_events`` — the product payload *and* the
+   portion, day and time;
 2. the **canonical** ``food_entry``, carrying ``raw_ref`` back to it.
+
+**Why the raw event records the portion and not just the product.** The first
+version of this stored only the product, and `normalize --rebuild` — which drops
+every canonical table and re-derives from raw — deleted logged meals and could
+not bring them back, because the grams existed nowhere in raw. Caught by running
+a rebuild. §2.1's rule is that canonical is *fully* regenerable, and the raw
+event therefore has to hold everything the canonical row was derived from. The
+raw here is the act of logging, not the encyclopaedia entry it referenced.
 """
 
 from __future__ import annotations
@@ -21,6 +29,19 @@ from typing import Any
 
 from ..normalize.foods import FoodItem, scale_to_grams
 from ..store.raw import insert_raw_event
+
+
+def food_entry_id(
+    source: str, external_id: str, day_key: str, grams: float, consumed_at: str | None
+) -> str:
+    """Deterministic canonical id for a logged portion.
+
+    Deterministic so logging the same food twice on the same day at the same
+    size is idempotent rather than silently doubling the day's intake, and so a
+    rebuild reproduces the *same* row id rather than a duplicate. Two genuinely
+    separate helpings differ by grams or ``consumed_at``.
+    """
+    return f"{source}:{external_id}:{day_key}:{grams:g}:{consumed_at or ''}"
 
 
 @dataclass(frozen=True)
@@ -50,23 +71,32 @@ def log_food(
     stored unmodified — the canonical row below is derived from it and could be
     rebuilt from it (§2.1).
     """
-    portion = scale_to_grams(item, grams)
     now = datetime.now(UTC).isoformat()
 
+    # Everything the canonical row is derived from, so a rebuild can reproduce
+    # it exactly (§2.1). `product` is the source payload, untouched.
+    envelope = {
+        "product": raw_payload,
+        "grams": grams,
+        "day_key": day_key,
+        "consumed_at": consumed_at,
+        "tz_name": tz_name,
+        "logged_at": now,
+    }
     raw_ref, _ = insert_raw_event(
         conn,
         source=item.source,
-        record_type="food_product",
-        payload=raw_payload,
-        external_id=item.external_id,
-        recorded_at=now,
+        record_type="food_log",
+        payload=envelope,
+        # Scoped to the portion, so the same food at two sizes is two raw events
+        # while a repeated identical log dedupes.
+        external_id=f"{item.external_id}:{day_key}:{grams:g}:{consumed_at or ''}",
+        recorded_at=consumed_at or now,
         user_id=user_id,
     )
 
-    # Deterministic id, so logging the same food twice on the same day at the
-    # same portion is idempotent rather than silently doubling the day's intake.
-    # Two genuinely separate helpings are distinguished by consumed_at.
-    entry_id = f"{item.source}:{item.external_id}:{day_key}:{grams:g}:{consumed_at or ''}"
+    portion = scale_to_grams(item, grams)
+    entry_id = food_entry_id(item.source, item.external_id, day_key, grams, consumed_at)
 
     conn.execute(
         "INSERT OR REPLACE INTO food_entry (id, user_id, day_key, source, entry_type, "

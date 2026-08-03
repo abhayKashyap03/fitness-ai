@@ -148,7 +148,9 @@ def test_logging_writes_raw_and_canonical_with_a_link(migrated_conn):
         "SELECT source, record_type FROM raw_events WHERE id=?", (logged.raw_ref,)
     ).fetchone()
     assert raw["source"] == "openfoodfacts"
-    assert raw["record_type"] == "food_product"
+    # The raw event is the logging ACT, not just the product — that is what
+    # makes the canonical row reproducible by a rebuild (§2.1).
+    assert raw["record_type"] == "food_log"
 
     row = migrated_conn.execute(
         "SELECT * FROM food_entry WHERE id=?", (logged.entry_id,)
@@ -211,3 +213,65 @@ def test_a_logged_food_reaches_the_day_total_view(migrated_conn):
     ).fetchone()
     assert row is not None
     assert row["kcal_total"] == pytest.approx(372)
+
+
+# ---- rebuild safety --------------------------------------------------------
+
+
+def test_logged_food_survives_a_full_rebuild(migrated_conn):
+    """The bug this normalizer exists for, caught by actually running a rebuild.
+
+    `normalize --rebuild` drops every canonical table and re-derives from raw
+    (§2.1). The first version of log_food stored only the PRODUCT, so the grams
+    existed nowhere in raw and a rebuild deleted the meal permanently. The raw
+    event now records the logging ACT — product plus portion, day and time — so
+    the canonical row is reproducible rather than merely backed up.
+    """
+    from coach.normalize.runner import normalize_all
+    from coach.store.canonical import canonical_fingerprint
+
+    item = parse_openfoodfacts(OATS)
+    assert item is not None
+    log_food(migrated_conn, item, grams=40, day_key="2026-08-03", raw_payload=OATS)
+    log_food(migrated_conn, item, grams=75, day_key="2026-08-04", raw_payload=OATS)
+    migrated_conn.commit()
+    before = canonical_fingerprint(migrated_conn)
+    assert migrated_conn.execute("SELECT COUNT(*) AS n FROM food_entry").fetchone()["n"] == 2
+
+    normalize_all(migrated_conn, user_id=1, rebuild=True)
+
+    assert migrated_conn.execute("SELECT COUNT(*) AS n FROM food_entry").fetchone()["n"] == 2
+    assert canonical_fingerprint(migrated_conn) == before, "rebuild must be byte-identical"
+
+
+def test_the_raw_event_carries_everything_the_entry_was_derived_from(migrated_conn):
+    """The invariant behind the fix: raw must be sufficient, not just present."""
+    import json
+
+    from coach.normalize.foods import parse_food_log
+
+    item = parse_openfoodfacts(OATS)
+    assert item is not None
+    logged = log_food(migrated_conn, item, grams=40, day_key="2026-08-03", raw_payload=OATS)
+    migrated_conn.commit()
+
+    payload = json.loads(
+        migrated_conn.execute(
+            "SELECT payload FROM raw_events WHERE id=?", (logged.raw_ref,)
+        ).fetchone()["payload"]
+    )
+    rebuilt = parse_food_log(payload)
+    assert rebuilt is not None
+    assert rebuilt.entry_id == logged.entry_id
+    assert rebuilt.grams == 40
+    assert rebuilt.kcal == pytest.approx(148.8)
+
+
+def test_a_malformed_food_log_envelope_is_skipped_not_crashed(migrated_conn):
+    """A rebuild must not be brought down by one bad row."""
+    from coach.normalize.foods import parse_food_log
+
+    assert parse_food_log({}) is None
+    assert parse_food_log({"product": OATS}) is None  # no grams
+    assert parse_food_log({"product": OATS, "grams": 0, "day_key": "2026-08-03"}) is None
+    assert parse_food_log({"product": {}, "grams": 40, "day_key": "2026-08-03"}) is None

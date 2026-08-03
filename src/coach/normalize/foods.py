@@ -145,3 +145,57 @@ def scale_to_grams(item: FoodItem, grams: float) -> ScaledPortion:
         fat_g=_s(item.fat_g_per_100g),
         fiber_g=_s(item.fiber_g_per_100g),
     )
+
+
+@dataclass(frozen=True)
+class LoggedFoodRow:
+    """A canonical ``food_entry`` derived from a stored food-log raw event."""
+
+    entry_id: str
+    day_key: str
+    source: str
+    consumed_at: str | None
+    tz_name: str | None
+    description: str
+    grams: float
+    kcal: float | None
+    protein_g: float | None
+    carbs_g: float | None
+    fat_g: float | None
+    fiber_g: float | None
+
+
+def parse_food_log(payload: dict[str, Any]) -> LoggedFoodRow | None:
+    """Rebuild a logged portion from its raw event. Pure.
+
+    This is what makes own-logged food survive ``normalize --rebuild`` (§2.1).
+    The envelope carries the product *and* the portion precisely so this
+    function can reproduce the canonical row without consulting it.
+    """
+    product = payload.get("product")
+    grams = payload.get("grams")
+    day_key = payload.get("day_key")
+    if not isinstance(product, dict) or not isinstance(grams, (int, float)) or not day_key:
+        return None
+    item = parse_openfoodfacts(product)
+    if item is None or grams <= 0:
+        return None
+
+    portion = scale_to_grams(item, float(grams))
+    consumed_at = payload.get("consumed_at")
+    return LoggedFoodRow(
+        entry_id=(
+            f"{item.source}:{item.external_id}:{day_key}:{float(grams):g}:{consumed_at or ''}"
+        ),
+        day_key=str(day_key),
+        source=item.source,
+        consumed_at=consumed_at,
+        tz_name=payload.get("tz_name"),
+        description=item.display,
+        grams=float(grams),
+        kcal=portion.kcal,
+        protein_g=portion.protein_g,
+        carbs_g=portion.carbs_g,
+        fat_g=portion.fat_g,
+        fiber_g=portion.fiber_g,
+    )

@@ -19,6 +19,7 @@ from ..store.canonical import (
     upsert_workout,
 )
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
+from .foods import parse_food_log
 from .healthkit import parse_body_record
 from .myfitnesspal import parse_diary, parse_exercise, parse_measurement
 from .whoop import parse_recovery, parse_sleep, parse_workout
@@ -130,6 +131,41 @@ def normalize_all(
         upsert_recovery(conn, brow, raw_ref=r["id"], derived_at=derived_at)
         n_ble += 1
 
+    # Own-logged food (P12). These are USER-AUTHORED but still raw-derived: the
+    # raw event holds the product AND the portion, so a rebuild reproduces the
+    # canonical row exactly rather than losing the meal (§2.1).
+    n_own_food = 0
+    for r in conn.execute(
+        "SELECT id, payload FROM raw_events WHERE record_type='food_log'"
+    ).fetchall():
+        frow = parse_food_log(json.loads(r["payload"]))
+        if frow is None:
+            continue
+        conn.execute(
+            "INSERT OR REPLACE INTO food_entry (id, user_id, day_key, source, entry_type, "
+            "consumed_at, tz_name, description, quantity, unit, kcal, protein_g, carbs_g, "
+            "fat_g, fiber_g, alcohol_g, raw_ref, derived_at) "
+            "VALUES (?,?,?,?,'item',?,?,?,?,'g',?,?,?,?,?,NULL,?,?)",
+            (
+                frow.entry_id,
+                user_id,
+                frow.day_key,
+                frow.source,
+                frow.consumed_at,
+                frow.tz_name,
+                frow.description,
+                frow.grams,
+                frow.kcal,
+                frow.protein_g,
+                frow.carbs_g,
+                frow.fat_g,
+                frow.fiber_g,
+                r["id"],
+                derived_at,
+            ),
+        )
+        n_own_food += 1
+
     n_wt, n_wt_skipped = _normalize_healthkit_weight(conn, user_id, derived_at)
     n_food = _normalize_mfp_food(conn, user_id, derived_at)
     n_mfp_wt = _normalize_mfp_weight(conn, user_id, derived_at)
@@ -140,6 +176,7 @@ def normalize_all(
     return {
         "recovery": n_rec,
         "recovery_ble": n_ble,
+        "food_own": n_own_food,
         "workout": n_wk,
         "sleep": n_slp,
         "weight": n_wt,
