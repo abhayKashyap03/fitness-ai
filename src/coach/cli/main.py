@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sqlite3
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -81,6 +82,90 @@ def _cmd_db_backup(settings: Settings, args: argparse.Namespace) -> int:
         conn.close()
     size_kb = dest.stat().st_size / 1024
     print(f"Backup written: {dest} ({size_kb:.0f} KiB)")
+    return 0
+
+
+def _cmd_db_rehearse_restore(settings: Settings, args: argparse.Namespace) -> int:
+    """Prove a snapshot would come back. Destroys nothing, so it can run on cron.
+
+    ADR-0019 §5: an untested backup is a belief, not a backup.
+    """
+    from ..store.maintenance import rehearse_restore
+
+    snapshot = Path(args.snapshot)
+    live = db.connect(settings.db_path) if settings.db_path.exists() else None
+    try:
+        try:
+            r = rehearse_restore(snapshot, live_conn=live)
+        except FileNotFoundError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 2
+        except sqlite3.DatabaseError as exc:
+            # A file that is not a database at all. This is a legitimate answer
+            # to "would this restore?" — no, and here is why — not a crash.
+            print(
+                f"NOT RESTORABLE — {snapshot} is not a readable database ({exc})", file=sys.stderr
+            )
+            return 1
+    finally:
+        if live is not None:
+            live.close()
+
+    print(f"snapshot:        {r.snapshot}")
+    print(f"integrity:       {r.report.integrity}")
+    print(f"schema version:  {r.schema_version}")
+    for table, n in r.report.row_counts.items():
+        delta = ""
+        if r.row_delta is not None:
+            d = r.row_delta.get(table, 0)
+            delta = f"   ({d:+d} vs live)" if d else "   (same as live)"
+        print(f"  {table:20} {'(missing)' if n < 0 else n}{delta}")
+    if r.live_fingerprint is not None:
+        # A behind-by-a-day backup is normal, not broken. Say which it is rather
+        # than reducing both to a red cross the operator learns to ignore.
+        verdict = "identical to live" if r.fingerprint_matches else "DIFFERS from live"
+        print(f"canonical data:  {verdict}")
+    print(r.summary)
+    return 0 if r.ok else 1
+
+
+def _cmd_db_restore(settings: Settings, args: argparse.Namespace) -> int:
+    """Replace the live database with a snapshot. Destructive; needs --yes (§8.5)."""
+    from ..store.maintenance import restore_db
+
+    snapshot = Path(args.snapshot)
+    if not args.yes:
+        print(
+            f"This REPLACES {settings.db_path} with {snapshot}.\n"
+            "The database being replaced is preserved beside it, not deleted.\n"
+            "Rehearse it first:  coach db rehearse-restore <snapshot>\n"
+            "Then re-run with --yes to proceed.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        result = restore_db(snapshot, settings.db_path)
+    except FileNotFoundError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
+    except sqlite3.DatabaseError as exc:
+        # Reached when the snapshot is not a database at all. The live file has
+        # not been touched at this point — restore_db verifies before it moves
+        # anything — and saying so plainly matters when this is read at 3am.
+        print(
+            f"REFUSED — {snapshot} is not a readable database ({exc}).\n"
+            f"{settings.db_path} was not touched.",
+            file=sys.stderr,
+        )
+        return 1
+    except ValueError as exc:
+        print(f"{exc}\n{settings.db_path} was not touched.", file=sys.stderr)
+        return 1
+    print(
+        f"Restored {result.db_path} from {result.restored_from} (schema v{result.schema_version})"
+    )
+    if result.replaced_to is not None:
+        print(f"Previous database kept at: {result.replaced_to}")
     return 0
 
 
@@ -1140,6 +1225,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_backup.set_defaults(func=_cmd_db_backup)
     p_verify = db_sub.add_parser("verify", help="integrity check + row counts + fingerprint")
     p_verify.set_defaults(func=_cmd_db_verify)
+    p_rehearse = db_sub.add_parser(
+        "rehearse-restore",
+        help="prove a snapshot would restore (destroys nothing; safe on cron)",
+    )
+    p_rehearse.add_argument("snapshot", help="path to a backup produced by `coach db backup`")
+    p_rehearse.set_defaults(func=_cmd_db_rehearse_restore)
+    p_restore = db_sub.add_parser(
+        "restore", help="REPLACE the live DB with a snapshot (destructive; needs --yes)"
+    )
+    p_restore.add_argument("snapshot", help="path to a backup produced by `coach db backup`")
+    p_restore.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm the overwrite (§8.5). Without it, the command only explains itself.",
+    )
+    p_restore.set_defaults(func=_cmd_db_restore)
 
     p_auth = sub.add_parser("auth", help="authorize a data source")
     auth_sub = p_auth.add_subparsers(dest="auth_command", required=True)
