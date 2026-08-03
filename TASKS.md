@@ -7,40 +7,47 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ---
 
-## ▶ NEXT UP (start here — updated 2026-07-29)
+## ▶ NEXT UP (start here — updated 2026-08-02)
 
-State: **524 tests green · ruff + mypy clean · schema v12 · PRs #12–#24 merged.**
+State: **suite green · ruff + mypy clean · schema v14 · PRs #12–#29 merged; #30
+(web auth) open for review.**
 
-Done 2026-07-29: plan-set service seam (#24); **zero-fabrication eval 10 → 50
-scenarios, all 9 tools covered** + `eval grounding --only/--limit` for cost
-control (§8.7). The eval's **live** model pass is a human step (burns tokens) —
-`coach eval grounding --limit 5` first, then the full set.
+**Read [ADR-0019](docs/adr/0019-hosting-the-owners-instance.md) before planning
+any hosting work.** It amends ADR-0018: the hosted instance is **the owner's
+own**, the 5–30 user beta is **deferred**, and the host becomes the **only**
+instance (laptop → backup archive). ADR-0018 read as a live beta commitment until
+2026-08-02; do not plan against that.
 
-Remaining near-term, in priority order: **BLE spike** (🧑 hardware), **D6**
-(🧑 may the model author coaching notes?), **model routing + prompt-cache/COGS
-audit** (§8.7 — measure before optimizing, §11).
+Done 2026-08-02: multi-tenant foundation (#29, migration 0014); auth wired into
+the web app (#30, open); `/account` page + a member's route to their own
+password; LLM cost accounting (#26, ADR-0017); protein target (#27); calibration
+surfaced (#28).
+
+Near-term, in priority order:
+
+1. **🧑 Set an owner password.** `app_user` row 1 is owner/active with an email
+   and **no password**. Once #30 merges, `coach web --host 0.0.0.0` **refuses to
+   start** without one — phone access over the LAN breaks until it is set.
+   `coach user set-password` (prompts, no echo, no flag).
+2. **Hosting, in the order ADR-0019 forces:** VPS → domain → TLS → headless
+   OAuth → migrate → cron sync → **rehearse restore**. Domain + TLS are
+   prerequisites, not polish (WHOOP is authorised on the host at
+   `https://<domain>/callback`). Blocking sub-item: `run_login` opens a browser
+   and binds a local `HTTPServer` — **it cannot run headless**, a variant is needed.
+3. **BLE spike (Adapter B)** — the subscription-survival play, and the membership
+   clock is running (recon 2026-07-25 said ~9 months). **Not blocked on hardware**
+   — the strap is worn daily. Blocked only on doing it, plus `bleak` needing §6.4
+   sign-off. Unlocks `compute/calibration.py` (built, no live caller: nothing to
+   compare against until `whoop_ble` sibling rows exist).
+4. **🧑 D6** — may the model author its own coaching notes? Recommendation: stay closed.
+5. **⏳ Plan layer TDEE-backed goal** — no code; accrues with logging.
+6. **⏭️ Phase 6B — MFP CSV backfill** — secondary; the daily v2 API path covers current data.
 
 Phases 0–7.5 done. The coach answers grounded questions live, *steers* (cut/bulk
-plan → daily calorie goal + adherence), and now has a **local web dashboard**
-(`coach web`, ADR-0014). Evals pass. Running daily on real data.
+plan → daily calorie goal + adherence), and has a **web dashboard** (`coach web`,
+ADR-0014) now behind real authentication. Evals pass. Running daily on real data.
 **Full roadmap (CLI → iOS app → public): [docs/ROADMAP.md](docs/ROADMAP.md)**
-(mirrors the Notion Project Task Board). What's left near-term, in priority order:
-
-1. **🧑 BLE hardware spike (Adapter B)** — the biggest open item and the
-   subscription-survival play. One-evening gate in
-   [ADR-0012](docs/adr/0012-ble-adapter-approach.md); needs the physical MG strap.
-   Unlocks `compute/calibration.py` (built, no live caller yet — nothing to compare
-   against until `whoop_ble` sibling rows exist).
-2. **⏳ Plan layer: full TDEE-backed goal** — plan layer is live (T7.0–T7.5), but the
-   daily calorie goal reads `Insufficient` until adaptive TDEE has ≥10 logged-intake
-   days ([ADR-0005](docs/adr/0005-adaptive-tdee.md)). Adherence works today (trend
-   only). Just needs a few more days of logging — no code.
-3. **⏭️ Phase 6B — MFP CSV backfill** — secondary; the daily v2 API path covers current data.
-
-Recently done (2026-07-26): **Phase 7 cut/bulk plan layer shipped + live-verified**
-(#16, incl. mid-cut backdating + adherence); Grok provider (#13); HRV verdict —
-**NOISE** on real data (#14); placeholder sweep (only `eval hrv` was one, fixed);
-**`eval grounding` + `eval hrv` pass**. Docs + Notion hub refreshed.
+(mirrors the Notion Project Task Board).
 
 ---
 
@@ -253,17 +260,24 @@ Config: `COACH_LLM_PROVIDER` (google|anthropic|grok), `GOOGLE_API_KEY` /
 
 Do **not** attempt these unattended. Listed so you don't waste the window trying.
 
-- **WHOOP 5.0 MG local BLE read** — needs the physical strap and a paired
-  Bluetooth radio. *Preparatory work DONE (2026-07-25):* ecosystem recon +
-  approach recorded in [ADR-0012](docs/adr/0012-ble-adapter-approach.md) —
-  5.0 protocol demonstrated by whoop-vault/NOOP (`fd4b` family); MG variant
-  pending a one-evening hardware spike (the ADR's acceptance gate). No BLE
-  dependencies or pairing code written, per this rule.
+- **WHOOP 5.0 MG local BLE read** — **NOT blocked on hardware availability.**
+  Corrected 2026-08-02: this entry read "needs the physical strap" for weeks and
+  was repeated into three session logs. The human wears the strap daily and
+  always has. It is blocked on (a) somebody sitting down for the evening and
+  (b) `bleak`, a new dependency needing §6.4 sign-off. *Preparatory work DONE
+  (2026-07-25):* ecosystem recon + approach in
+  [ADR-0012](docs/adr/0012-ble-adapter-approach.md) — 5.0 protocol demonstrated
+  by whoop-vault/NOOP (`fd4b` family); the MG **variant** is what the spike
+  verifies. No BLE dependencies or pairing code written yet.
 - **HealthKit / Health Connect ingestion** — data lives on the phone. Blocked
   until the human sets up an export path.
-- **Live WHOOP API verification** — needs real credentials in `.env`.
 - **Coaching methodology** (cut aggressiveness, training philosophy) — the
   human's body, the human's call.
+
+_(Removed 2026-08-02: "Live WHOOP API verification — needs real credentials."
+Credentials have been in `.env` and WHOOP has been ingesting live since
+2026-07-25. **Check whether a documented blocker is still real before repeating
+it** — that is the lesson both of the corrections on this list share.)_
 
 ---
 

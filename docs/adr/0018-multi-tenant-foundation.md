@@ -6,6 +6,15 @@ backend) that [ADR-0014](0014-local-web-ui.md) deliberately left standing.
 Implements ROADMAP P11. Decided by the human; the three forks below were put to
 them explicitly rather than chosen here.
 
+**⚠️ Amended same day by [ADR-0019](0019-hosting-the-owners-instance.md).**
+Decision 1 below — "invite-only beta, ~5–30 users" — is **no longer the plan**.
+The hosted instance is the owner's own; the beta is deferred, not cancelled. The
+invite and member machinery is **retained as hosting infrastructure** and nothing
+here is removed. Decisions 2 and 3 (SQLite on a volume; per-user secrets
+encrypted at rest) are unaffected and remain in force. The medical-disclaimer
+prerequisite in *Consequences* also remains in force — read it as an armed
+tripwire rather than a scheduled task, since no second human is expected.
+
 ## Context
 The local web dashboard proved useful enough on a phone (LAN, added to the home
 screen) that the next step is a hosted backend other people can reach. §11 has
@@ -31,6 +40,9 @@ else — and they are credentials to *other people's* health accounts.
 ## Decision
 
 **1. Invite-only beta, ~5–30 users. No public signup.**
+_(Superseded by [ADR-0019](0019-hosting-the-owners-instance.md) — the beta is
+deferred and the host is the owner's own instance. The no-public-signup rule
+below still holds, and the machinery it describes is kept.)_
 
 Registration, email verification, password reset and abuse handling are each a
 project in themselves and none of them are the product. An invite creates the

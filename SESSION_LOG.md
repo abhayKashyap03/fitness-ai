@@ -145,10 +145,65 @@ which is a start, not the whole obligation.
 
 ---
 
+## Session 2026-08-02 (c) — the record caught up with the plan (ADR-0019)
+
+No behaviour changed. The repo was **describing a different project than the one
+being built**, which is the kind of drift that costs a whole session to discover.
+
+The human ran a questioning session and made eight decisions. None had been
+written down. `ADR-0018` still read as a live commitment to a 5–30 user
+invite-only beta, and `ROADMAP` P11 planned against it — so the next session
+would have picked up work for a beta that is not happening.
+
+- **[ADR-0019](docs/adr/0019-hosting-the-owners-instance.md)** records all eight.
+  The load-bearing one: **the hosted instance is the owner's own**, and the host
+  becomes the **only** instance — the laptop stops holding live data and becomes
+  the backup archive. WHOOP is authorised **on the host** via a public
+  `https://<domain>/callback`, which is why **domain + TLS are prerequisites, not
+  polish**, and which keeps a rollback path alive (the host authorises itself
+  rather than stealing the laptop's only working token).
+- **The beta is deferred, not cancelled** (option C). No code deleted; the invite
+  and member machinery is retained as hosting infrastructure. ADR-0018's "no
+  second human logs in until medical disclaimers land" prerequisite **stays
+  armed** — a tripwire, not a scheduled task.
+- **Recovery-informed inference is pre-registered, not abandoned**: judged at
+  **n = 150 HRV days** on the existing `hrv_verdict()` thresholds (autocorr ≥ 0.30
+  AND next-day |r| ≥ 0.20). Meets → build; misses → cut, on that date. Fixing the
+  threshold before the data arrives is what makes a null honest (risk #6).
+  **Narration is not gated** and ships now — "recovery is low, train lighter"
+  needs no statistical claim (§8.6). Only computed numbers wait.
+- **Committed the human's own `/account` nav fix** (+3 tests). The tab was
+  owner-gated, so an invited member had no route to the password-change form and
+  no reset flow exists. Owner-only controls inside the page stay gated, pinned by
+  a test.
+- **Two stale blockers corrected in TASKS.** The BLE spike was never blocked on
+  hardware — the strap is worn daily; it needs an evening and `bleak` (§6.4
+  sign-off). "Live WHOOP API verification — needs real credentials" was removed
+  outright; WHOOP has ingested live since 2026-07-25. Both had been repeated
+  forward unchecked. **Verify a documented blocker is still real before
+  repeating it.**
+
+**668 green; ruff + mypy clean** — unchanged, as expected for a docs commit.
+
+### Four gaps ADR-0019 exposes, all unbuilt
+1. `run_login` (`adapters/whoop/flow.py`) calls `webbrowser.open` and binds a
+   local `HTTPServer` — **cannot run on a headless host**. Needs a variant.
+2. **Nothing in the repo schedules anything.** Nightly sync needs host cron.
+3. WHOOP tokens still live in `.credentials/u<id>/whoop_token.json`, not the
+   encrypted `user_secret` store ADR-0018 built for them.
+4. `COACH_DB_PATH` goes straight to `sqlite3.connect` — there is **no remote-DB
+   mode**, which is why the CLI must be reached over SSH.
+
+⚠️ **The owner has no password set.** `app_user` row 1 is owner/active with an
+email and no digest. Once #30 merges, `coach web --host 0.0.0.0` **refuses to
+start** — LAN phone access breaks until `coach user set-password` is run.
+
+---
+
 ## Where the code stands (verified 2026-08-02)
 
-- **656 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).
-  PRs #12–#29 merged; web auth open for review.
+- **668 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).
+  PRs #12–#29 merged; web auth (#30) open for review.
 - **Zero-fabrication eval at 50 scenarios covering all 9 tools — 50/50 passing
   live on Grok.** Zero fabrications found.
 - **LLM spend is recorded and reportable** (`coach cost`); rates unset, so spend
@@ -175,9 +230,11 @@ which is a start, not the whole obligation.
   user's call, do not act.
 
 ### What's next → see [TASKS.md](TASKS.md) ▶ NEXT UP
-Now the **hosted multi-tenant backend** (ADR-0018): wire auth into the web app,
-then hosting, then per-user ingest. The **BLE spike** (ADR-0012) is *not* blocked
-on hardware — the strap is worn daily and always has been; it is blocked only on
+**Hosting the owner's own instance** ([ADR-0019](docs/adr/0019-hosting-the-owners-instance.md)),
+in the order that ADR forces: VPS → domain → TLS → headless OAuth → migrate →
+cron sync → **rehearse the restore**. Set an owner password first, or #30 merging
+takes LAN phone access down. The **BLE spike** (ADR-0012) is *not* blocked on
+hardware — the strap is worn daily and always has been; it is blocked only on
 someone doing it, and it needs `bleak` (a dependency needing §6.4 sign-off).
 
 ---
