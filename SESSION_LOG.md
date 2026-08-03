@@ -278,6 +278,46 @@ gets 403 until it accepts.
 
 ---
 
+## Session 2026-08-03 — the BLE gate PASSED on the real MG strap 🎉
+
+**The project's single biggest technical risk (§10.1) is retired.** ADR-0012's
+acceptance test — does the owner's own MG-variant strap expose the `fd4b`
+family — was run in the human's own terminal and **passed**.
+
+`coach ble scan` found `WHOOP MG…` at −53 dBm **advertising the `fd4b` family**,
+and `coach ble probe` enumerated four services. Full output, identifiers
+scrubbed, in `tests/fixtures/whoop_ble/mg_gatt_probe_2026-08-03.json` — kept as
+the **baseline**, because firmware moves (risk #9) and the only way to notice is
+to have written down what it looked like when it worked.
+
+**Two findings that shape the adapter:**
+
+1. **`fd4b0006` is absent.** whoop-vault documents `fd4b0002–0007` on r52
+   "Maverick"; this MG exposes five (`0002, 0003, 0004, 0005, 0007`). Exactly
+   the MG-variant divergence ADR-0012 named as residual risk, now a concrete
+   known difference. **The drain must not assume `0006` exists — check this
+   first when building it.**
+2. **Live HR needs no reverse engineering.** Standard SIG Heart Rate
+   (`180d`/`2a37`) is exposed. 1 Hz HR with no `fd4b` framing, no CRC, no
+   handshake — a fallback that survives independently of firmware pushes
+   breaking the proprietary protocol. Materially de-risks §10.9.
+
+Also present: Battery (`180f`/`2a19`) and Device Information (`180a`).
+
+**Getting there took disproving two blockers and finding a third.** "Needs the
+strap" was false for the whole project. "Needs a `bleak` decision" was signed
+off. The real one was **macOS TCC**: `BleakScanner.discover()` died with SIGABRT
+(exit 134) and no Python exception, C stack showing
+`__TCC_CRASHING_DUE_TO_PRIVACY_VIOLATION__`. Granting Bluetooth to the host app
+**and restarting it** cleared it — the restart is the easy-to-miss part, since
+TCC caches per responsible app at launch.
+
+**Not built:** the historical drain, and any ingest. ADR-0012 §4 gates ingest on
+this result, and the result only just arrived. Nothing writes `whoop_ble` rows
+yet, so `compute/calibration.py` still has no honest cross-instrument pair.
+
+---
+
 ## Where the code stands (verified 2026-08-02)
 
 - **668 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).

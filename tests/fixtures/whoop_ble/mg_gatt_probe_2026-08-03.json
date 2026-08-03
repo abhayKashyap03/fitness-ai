@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "REAL GATT enumeration from the owner's WHOOP 5.0 MG strap, 2026-08-03.",
+    "This is the ADR-0012 acceptance-gate evidence. Recorded verbatim except for",
+    "the scrubs below (CLAUDE.md §6.2: scrub identifiers before committing).",
+    "",
+    "SCRUBBED: the advertised device name carried a device serial ('WHOOP MG<serial>')",
+    "and the address is a host-local CoreBluetooth UUID. Neither is needed to read",
+    "the protocol shape, and both identify a specific physical device.",
+    "",
+    "Why keep this at all: it is the baseline. WHOOP pushes firmware through the",
+    "official app (risk #9), and the ONLY way to notice the protocol moving under",
+    "us is to have written down what it looked like when it worked."
+  ],
+  "captured_at": "2026-08-03",
+  "platform": "macOS / CoreBluetooth",
+  "device": {
+    "name": "WHOOP MG<scrubbed>",
+    "address": "<scrubbed host-local CoreBluetooth UUID>",
+    "rssi_dbm": -53,
+    "advertised_service_family": "fd4b"
+  },
+  "verdict": "GATE PASSED — fd4b (5.0/MG) service family present, 5 characteristic(s)",
+  "services": {
+    "0000180a-0000-1000-8000-00805f9b34fb": {
+      "name": "Device Information (SIG)",
+      "characteristics": [
+        "00002a29-0000-1000-8000-00805f9b34fb",
+        "00002a24-0000-1000-8000-00805f9b34fb",
+        "00002a25-0000-1000-8000-00805f9b34fb",
+        "00002a26-0000-1000-8000-00805f9b34fb",
+        "00002a27-0000-1000-8000-00805f9b34fb"
+      ]
+    },
+    "0000180d-0000-1000-8000-00805f9b34fb": {
+      "name": "Heart Rate (SIG)",
+      "note": "2a37 is the standard Heart Rate Measurement characteristic. Live HR is therefore readable with NO proprietary protocol — a fallback path independent of the fd4b drain.",
+      "characteristics": ["00002a37-0000-1000-8000-00805f9b34fb"]
+    },
+    "0000180f-0000-1000-8000-00805f9b34fb": {
+      "name": "Battery Service (SIG)",
+      "characteristics": ["00002a19-0000-1000-8000-00805f9b34fb"]
+    },
+    "fd4b0001-cce1-4033-93ce-002d5875f58a": {
+      "name": "WHOOP 5.0/MG proprietary family",
+      "note": "whoop-vault documents fd4b0002-0007 on firmware r52 'Maverick'. THIS MG EXPOSES FIVE, NOT SIX — fd4b0006 is absent. That is the MG-variant divergence ADR-0012 named as residual risk, now a concrete known difference.",
+      "characteristics": [
+        "fd4b0002-cce1-4033-93ce-002d5875f58a",
+        "fd4b0003-cce1-4033-93ce-002d5875f58a",
+        "fd4b0004-cce1-4033-93ce-002d5875f58a",
+        "fd4b0005-cce1-4033-93ce-002d5875f58a",
+        "fd4b0007-cce1-4033-93ce-002d5875f58a"
+      ],
+      "absent_vs_reference": ["fd4b0006-cce1-4033-93ce-002d5875f58a"]
+    }
+  }
+}
