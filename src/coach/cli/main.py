@@ -968,20 +968,30 @@ def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
             today=_today(settings),
             hk_file=Path(args.hk_file) if args.hk_file else None,
         )
-        for src in result.sources:
-            if src.skipped:
-                print(f"  {src.name}: {src.skipped} — skipped")
-                continue
-            since = f" (incremental since {src.since})" if src.since else ""
-            print(f"  {src.name}:{since}")
-            for key, c in src.counts.items():
-                if isinstance(c, dict):  # nested per-record-type counts
-                    print(f"    {key:18} inserted={c['inserted']:4d} skipped={c['skipped']:4d}")
-                else:
-                    print(f"    {key:18} {c}")
-        print("  normalize:", "  ".join(f"{k}={v}" for k, v in result.normalized.items()))
+        # Under --quiet a clean run says nothing at all. cron mails whatever a
+        # job writes to stdout, so a chatty success trains you to filter the
+        # mail, and then you miss the failure. Silence means "nothing to do".
+        verbose = not args.quiet or not result.ok
+        if verbose:
+            for src in result.sources:
+                if src.skipped:
+                    mark = "NEEDS ATTENTION" if src.needs_attention else "skipped"
+                    print(f"  {src.name}: {src.skipped} — {mark}")
+                    continue
+                since = f" (incremental since {src.since})" if src.since else ""
+                print(f"  {src.name}:{since}")
+                for key, c in src.counts.items():
+                    if isinstance(c, dict):  # nested per-record-type counts
+                        print(f"    {key:18} inserted={c['inserted']:4d} skipped={c['skipped']:4d}")
+                    else:
+                        print(f"    {key:18} {c}")
+            print("  normalize:", "  ".join(f"{k}={v}" for k, v in result.normalized.items()))
     finally:
         conn.close()
+    if not result.ok:
+        names = ", ".join(s.name for s in result.attention)
+        print(f"sync finished with sources needing attention: {names}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1387,6 +1397,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="ALSO ingest an Apple Health export (occasional weight backfill; not part of the daily path)",
     )
+    p_sync.add_argument(
+        "--quiet",
+        action="store_true",
+        help=(
+            "print nothing when everything worked; print everything when it did not. "
+            "For cron, which mails you whatever the job prints."
+        ),
+    )
     p_sync.set_defaults(func=_cmd_sync)
 
     p_plan = sub.add_parser("plan", help="set / show the cut/bulk plan (ADR-0013)")
@@ -1462,7 +1480,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
-    _configure_logging(settings.log_level)
+    # --quiet has to mean quiet, including the library logs. Found by running
+    # `coach sync --quiet` for real: it suppressed the command's own output and
+    # then printed fifteen httpx INFO lines anyway, which under cron is a nightly
+    # email about nothing — precisely the noise the flag exists to remove, and
+    # precisely how a real failure ends up filtered away unread.
+    level = "WARNING" if getattr(args, "quiet", False) else settings.log_level
+    _configure_logging(level)
     return int(args.func(settings, args))
 
 

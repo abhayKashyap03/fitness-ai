@@ -1,0 +1,44 @@
+# Caddy reverse proxy for the coach web app (ADR-0019 §4).
+#
+# Caddy over nginx for one reason that matters here: it obtains and renews the
+# TLS certificate itself, with no certbot cron job to rot. This is a machine
+# meant to be neglected for months at a time (risk #9), and the failure mode of
+# a forgotten renewal is the whole site going dark.
+#
+# TLS terminates HERE. `coach web` speaks plain HTTP to this proxy and never
+# holds a certificate. That is not an oversight — it means the app has no
+# certificate lifecycle to get wrong, and it is why the app trusts
+# X-Forwarded-Proto to decide whether to set the Secure cookie flag.
+#
+#   Install:  copy to /etc/caddy/Caddyfile, replace coach.example.com, then
+#             `sudo systemctl reload caddy`
+#
+# Replace this with the real domain. Caddy uses it to request the certificate,
+# so a placeholder here means no HTTPS.
+coach.example.com {
+	# The app binds loopback ONLY (see coach-web.service). Nothing but this
+	# proxy can reach it, so the public port and the app port are separate
+	# concerns and the app is never directly exposed.
+	reverse_proxy 127.0.0.1:8765
+
+	encode gzip
+
+	header {
+		# The app is same-origin and loads no third-party anything — no CDN,
+		# no fonts, no analytics (personal health data never touches another
+		# host). That makes a strict CSP essentially free.
+		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+		# Don't advertise the stack to scanners.
+		-Server
+	}
+
+	# Health checks are noise in an access log you only read after an incident.
+	log {
+		output file /var/log/caddy/coach.log
+		format json
+	}
+}

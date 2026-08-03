@@ -37,12 +37,29 @@ class SourceResult:
     counts: dict = field(default_factory=dict)
     skipped: str | None = None  # human-readable reason, None when it ran
     since: str | None = None
+    # Whether this outcome needs a human.
+    #
+    # ``skipped`` alone cannot answer that, and conflating the two was a real
+    # bug once sync moved to cron: "not configured" (a source you don't use) and
+    # "auth needed" (a token that expired last Tuesday) were the same string and
+    # the same exit code, so a dead credential would quietly ingest nothing
+    # forever while the nightly job reported success.
+    needs_attention: bool = False
 
 
 @dataclass(frozen=True)
 class SyncResult:
     sources: list[SourceResult]
     normalized: dict[str, int]
+
+    @property
+    def ok(self) -> bool:
+        """False if any source needs a human. Drives the process exit code."""
+        return not any(s.needs_attention for s in self.sources)
+
+    @property
+    def attention(self) -> list[SourceResult]:
+        return [s for s in self.sources if s.needs_attention]
 
 
 def run_sync(
@@ -74,6 +91,7 @@ def run_sync(
                 SourceResult(
                     "whoop",
                     skipped="no prior ingest — run `coach ingest whoop --since <date>` once first",
+                    needs_attention=True,
                 )
             )
         else:
@@ -84,7 +102,7 @@ def run_sync(
     except ConfigError:
         sources.append(SourceResult("whoop", skipped="not configured"))
     except ReauthRequired as exc:
-        sources.append(SourceResult("whoop", skipped=f"auth needed ({exc})"))
+        sources.append(SourceResult("whoop", skipped=f"auth needed ({exc})", needs_attention=True))
 
     # --- MyFitnessPal (food + weight) ---
     try:
@@ -95,6 +113,7 @@ def run_sync(
                 SourceResult(
                     "mfp",
                     skipped="no prior ingest — run `coach ingest mfp --since <date>` once first",
+                    needs_attention=True,
                 )
             )
         else:
@@ -110,7 +129,7 @@ def run_sync(
     except ConfigError:
         sources.append(SourceResult("mfp", skipped="not configured"))
     except MfpAuthError as exc:
-        sources.append(SourceResult("mfp", skipped=f"auth needed ({exc})"))
+        sources.append(SourceResult("mfp", skipped=f"auth needed ({exc})", needs_attention=True))
 
     # --- HealthKit: occasional backfill, only when explicitly requested ---
     if hk_file is not None:
@@ -120,6 +139,14 @@ def run_sync(
             hk_counts = ingest_healthkit(conn, hk_file, user_id=settings.user_id)
             sources.append(SourceResult("healthkit", counts=dict(hk_counts)))
         else:
-            sources.append(SourceResult("healthkit", skipped=f"export not found: {hk_file}"))
+            sources.append(
+                SourceResult(
+                    "healthkit",
+                    skipped=f"export not found: {hk_file}",
+                    # Explicitly requested via --hk-file and not there: the
+                    # operator asked for something that did not happen.
+                    needs_attention=True,
+                )
+            )
 
     return SyncResult(sources=sources, normalized=normalize_all(conn, user_id=settings.user_id))
