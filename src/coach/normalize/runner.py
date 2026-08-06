@@ -19,9 +19,12 @@ from ..store.canonical import (
     upsert_workout,
 )
 from .dedup import DEFAULT_TOLERANCE_S, WkSlot, assign_session_groups
+from .exercise import parse_exercise_log
+from .foods import parse_food_log
 from .healthkit import parse_body_record
 from .myfitnesspal import parse_diary, parse_exercise, parse_measurement
 from .whoop import parse_recovery, parse_sleep, parse_workout
+from .whoop_ble import parse_ble_session
 
 
 def _utcnow_iso() -> str:
@@ -116,6 +119,67 @@ def normalize_all(
         upsert_sleep(conn, srow, raw_ref=r["id"], derived_at=derived_at)
         n_slp += 1
 
+    # Adapter B sibling rows (ADR-0012). Same `recovery` table, different
+    # source — the read-time resolver decides which one wins, and the objective
+    # measurements from both stay comparable for calibration (§5).
+    n_ble = 0
+    for r in conn.execute(
+        "SELECT id, payload FROM raw_events WHERE source='whoop_ble' AND record_type='hr_session'"
+    ).fetchall():
+        brow = parse_ble_session(json.loads(r["payload"]), user_id=user_id)
+        if brow is None:
+            continue  # a session that measured nothing stays absent (§2.7)
+        upsert_recovery(conn, brow, raw_ref=r["id"], derived_at=derived_at)
+        n_ble += 1
+
+    # Hand-logged exercise (P12). Same rule as own-logged food: `workout` is a
+    # raw-derived table the rebuild owns, so the raw event has to be sufficient
+    # to reproduce the row rather than merely record that it happened.
+    n_own_ex = 0
+    for r in conn.execute(
+        "SELECT id, payload FROM raw_events WHERE record_type='exercise_log'"
+    ).fetchall():
+        exrow = parse_exercise_log(json.loads(r["payload"]), user_id=user_id)
+        if exrow is None:
+            continue
+        upsert_workout(conn, exrow, raw_ref=r["id"], derived_at=derived_at)
+        n_own_ex += 1
+
+    # Own-logged food (P12). These are USER-AUTHORED but still raw-derived: the
+    # raw event holds the product AND the portion, so a rebuild reproduces the
+    # canonical row exactly rather than losing the meal (§2.1).
+    n_own_food = 0
+    for r in conn.execute(
+        "SELECT id, payload FROM raw_events WHERE record_type='food_log'"
+    ).fetchall():
+        frow = parse_food_log(json.loads(r["payload"]))
+        if frow is None:
+            continue
+        conn.execute(
+            "INSERT OR REPLACE INTO food_entry (id, user_id, day_key, source, entry_type, "
+            "consumed_at, tz_name, description, quantity, unit, kcal, protein_g, carbs_g, "
+            "fat_g, fiber_g, alcohol_g, raw_ref, derived_at) "
+            "VALUES (?,?,?,?,'item',?,?,?,?,'g',?,?,?,?,?,NULL,?,?)",
+            (
+                frow.entry_id,
+                user_id,
+                frow.day_key,
+                frow.source,
+                frow.consumed_at,
+                frow.tz_name,
+                frow.description,
+                frow.grams,
+                frow.kcal,
+                frow.protein_g,
+                frow.carbs_g,
+                frow.fat_g,
+                frow.fiber_g,
+                r["id"],
+                derived_at,
+            ),
+        )
+        n_own_food += 1
+
     n_wt, n_wt_skipped = _normalize_healthkit_weight(conn, user_id, derived_at)
     n_food = _normalize_mfp_food(conn, user_id, derived_at)
     n_mfp_wt = _normalize_mfp_weight(conn, user_id, derived_at)
@@ -125,6 +189,9 @@ def normalize_all(
     conn.commit()
     return {
         "recovery": n_rec,
+        "recovery_ble": n_ble,
+        "food_own": n_own_food,
+        "exercise_own": n_own_ex,
         "workout": n_wk,
         "sleep": n_slp,
         "weight": n_wt,
@@ -267,6 +334,16 @@ def _normalize_mfp_workout(conn: sqlite3.Connection, user_id: int, derived_at: s
     return n
 
 
+def regroup_workouts(conn: sqlite3.Connection, tolerance_s: int = DEFAULT_TOLERANCE_S) -> int:
+    """Public alias — the write paths need this too, not just the rebuild.
+
+    A hand-logged session that leaves session_group_id unset produces different
+    canonical state from the same raw than a rebuild does, and until the next
+    normalize a workout the strap also caught would be counted twice (§5).
+    """
+    return _regroup_workouts(conn, tolerance_s)
+
+
 def _regroup_workouts(conn: sqlite3.Connection, tolerance_s: int) -> int:
     slots = [
         WkSlot(
@@ -316,11 +393,7 @@ def _absorb_placeholder_time_sources(
     session is the safer error; double-counting inflates burn and would flatter
     the cut.
     """
-    rows = list(
-        conn.execute(
-            "SELECT id, user_id, day_key, sport_type, source FROM workout"
-        )
-    )
+    rows = list(conn.execute("SELECT id, user_id, day_key, sport_type, source FROM workout"))
     measured_group: dict[tuple[int, str, str], str] = {}
     for r in rows:
         if r["source"] in _PLACEHOLDER_TIME_SOURCES:

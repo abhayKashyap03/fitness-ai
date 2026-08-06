@@ -8,16 +8,17 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sqlite3
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..adapters.whoop.auth import ReauthRequired, TokenStore, WhoopOAuth
+from ..adapters.whoop.auth import ReauthRequired, WhoopOAuth
 from ..adapters.whoop.client import WhoopClient
 from ..adapters.whoop.ingest import ingest_whoop
 from ..config import ConfigError, Settings, load_settings
 from ..normalize.runner import normalize_all
-from ..paths import whoop_token_path
+from ..services.credentials import whoop_token_store
 from ..store import db
 
 
@@ -84,6 +85,90 @@ def _cmd_db_backup(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_db_rehearse_restore(settings: Settings, args: argparse.Namespace) -> int:
+    """Prove a snapshot would come back. Destroys nothing, so it can run on cron.
+
+    ADR-0019 §5: an untested backup is a belief, not a backup.
+    """
+    from ..store.maintenance import rehearse_restore
+
+    snapshot = Path(args.snapshot)
+    live = db.connect(settings.db_path) if settings.db_path.exists() else None
+    try:
+        try:
+            r = rehearse_restore(snapshot, live_conn=live)
+        except FileNotFoundError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 2
+        except sqlite3.DatabaseError as exc:
+            # A file that is not a database at all. This is a legitimate answer
+            # to "would this restore?" — no, and here is why — not a crash.
+            print(
+                f"NOT RESTORABLE — {snapshot} is not a readable database ({exc})", file=sys.stderr
+            )
+            return 1
+    finally:
+        if live is not None:
+            live.close()
+
+    print(f"snapshot:        {r.snapshot}")
+    print(f"integrity:       {r.report.integrity}")
+    print(f"schema version:  {r.schema_version}")
+    for table, n in r.report.row_counts.items():
+        delta = ""
+        if r.row_delta is not None:
+            d = r.row_delta.get(table, 0)
+            delta = f"   ({d:+d} vs live)" if d else "   (same as live)"
+        print(f"  {table:20} {'(missing)' if n < 0 else n}{delta}")
+    if r.live_fingerprint is not None:
+        # A behind-by-a-day backup is normal, not broken. Say which it is rather
+        # than reducing both to a red cross the operator learns to ignore.
+        verdict = "identical to live" if r.fingerprint_matches else "DIFFERS from live"
+        print(f"canonical data:  {verdict}")
+    print(r.summary)
+    return 0 if r.ok else 1
+
+
+def _cmd_db_restore(settings: Settings, args: argparse.Namespace) -> int:
+    """Replace the live database with a snapshot. Destructive; needs --yes (§8.5)."""
+    from ..store.maintenance import restore_db
+
+    snapshot = Path(args.snapshot)
+    if not args.yes:
+        print(
+            f"This REPLACES {settings.db_path} with {snapshot}.\n"
+            "The database being replaced is preserved beside it, not deleted.\n"
+            "Rehearse it first:  coach db rehearse-restore <snapshot>\n"
+            "Then re-run with --yes to proceed.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        result = restore_db(snapshot, settings.db_path)
+    except FileNotFoundError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
+    except sqlite3.DatabaseError as exc:
+        # Reached when the snapshot is not a database at all. The live file has
+        # not been touched at this point — restore_db verifies before it moves
+        # anything — and saying so plainly matters when this is read at 3am.
+        print(
+            f"REFUSED — {snapshot} is not a readable database ({exc}).\n"
+            f"{settings.db_path} was not touched.",
+            file=sys.stderr,
+        )
+        return 1
+    except ValueError as exc:
+        print(f"{exc}\n{settings.db_path} was not touched.", file=sys.stderr)
+        return 1
+    print(
+        f"Restored {result.db_path} from {result.restored_from} (schema v{result.schema_version})"
+    )
+    if result.replaced_to is not None:
+        print(f"Previous database kept at: {result.replaced_to}")
+    return 0
+
+
 def _cmd_db_verify(settings: Settings, _args: argparse.Namespace) -> int:
     from ..store.maintenance import verify_db
 
@@ -114,8 +199,9 @@ def _cmd_db_verify(settings: Settings, _args: argparse.Namespace) -> int:
 # ---- auth subcommands ------------------------------------------------------
 
 
-def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
-    from ..adapters.whoop.flow import run_login  # local: touches browser/socket
+def _cmd_auth_whoop(settings: Settings, args: argparse.Namespace) -> int:
+    # local import: touches browser/socket/stdin
+    from ..adapters.whoop.flow import run_login, run_login_headless
 
     try:
         settings.require_whoop()
@@ -127,9 +213,12 @@ def _cmd_auth_whoop(settings: Settings, _args: argparse.Namespace) -> int:
         settings.whoop_client_secret,
         settings.whoop_redirect_uri,
     )
-    store = TokenStore(whoop_token_path(settings.user_id))
+    store = whoop_token_store(settings)
     try:
-        tokens = run_login(oauth, store, settings.whoop_redirect_uri)
+        if args.headless:
+            tokens = run_login_headless(oauth, store)
+        else:
+            tokens = run_login(oauth, store, settings.whoop_redirect_uri)
     except (ReauthRequired, RuntimeError) as exc:
         print(f"WHOOP authorization failed: {exc}", file=sys.stderr)
         return 1
@@ -471,8 +560,22 @@ def _cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
         f"in={u.input_tokens} out={u.output_tokens} cached={u.cached_input_tokens}]",
         file=sys.stderr,
     )
+    _print_disclaimer()
     _record_spend(settings, provider, result, command="ask")
     return 0
+
+
+def _print_disclaimer() -> None:
+    """The §8.6 notice, on stderr beside the usage line.
+
+    stderr rather than stdout so piping an answer into another tool still yields
+    just the answer — the same split the token-usage line already uses. The
+    reader still sees it in an interactive terminal, which is where advice is
+    actually acted on.
+    """
+    from ..disclaimer import SHORT
+
+    print(f"[{SHORT}]", file=sys.stderr)
 
 
 def _record_spend(settings: Settings, provider: object, result: object, *, command: str) -> None:
@@ -813,7 +916,7 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
     try:
         settings.require_whoop()
         print("  whoop creds:    configured")
-        store = TokenStore(whoop_token_path(settings.user_id))
+        store = whoop_token_store(settings)
         tokens = store.load() if store.exists() else None
         if tokens is None:
             problems += 1
@@ -843,6 +946,250 @@ def _cmd_doctor(settings: Settings, _args: argparse.Namespace) -> int:
     return 0 if problems == 0 else 1
 
 
+def _cmd_ble_scan(_settings: Settings, args: argparse.Namespace) -> int:
+    """List nearby BLE devices, most-likely-WHOOP first (ADR-0012 spike)."""
+    try:
+        from ..adapters.whoop_ble.discover import scan
+    except ImportError:
+        print("BLE support needs the optional extra:  pip install -e '.[ble]'", file=sys.stderr)
+        return 2
+
+    print(f"Scanning for {args.seconds:.0f}s… (the strap must be worn or recently moved)")
+    found = scan(args.seconds)
+    if not found:
+        print(
+            "No BLE devices seen at all — is Bluetooth on, and is this terminal allowed to use it?"
+        )
+        return 1
+
+    likely = [c for c in found if c.likely_whoop]
+    for c in found:
+        mark = "★" if c.likely_whoop else " "
+        rssi = f"{c.rssi:>4} dBm" if c.rssi is not None else "   ? dBm"
+        print(f" {mark} {c.address}  {rssi}  {c.name or '(no name)'}")
+        if c.likely_whoop:
+            print(f"      {c.why}")
+    print(f"\n{len(found)} device(s); {len(likely)} look like a WHOOP.")
+    if not likely:
+        # Say what to do next rather than just reporting nothing. A strap that
+        # is bonded to the phone may not advertise while that connection holds.
+        print(
+            "\nNo candidates. Worth trying: put the phone's Bluetooth OFF (the strap "
+            "holds one bond at a time), move the strap, and rescan."
+        )
+        return 1
+    print(f"\nNext:  coach ble probe {likely[0].address}")
+    return 0
+
+
+def _cmd_ble_probe(_settings: Settings, args: argparse.Namespace) -> int:
+    """Connect and enumerate GATT — ADR-0012's acceptance gate."""
+    try:
+        from ..adapters.whoop_ble.discover import probe
+    except ImportError:
+        print("BLE support needs the optional extra:  pip install -e '.[ble]'", file=sys.stderr)
+        return 2
+
+    print(f"Connecting to {args.address}… (may prompt to pair)")
+    result = probe(args.address, timeout=args.timeout)
+    if result.connected:
+        for uuid, chars in sorted(result.services.items()):
+            print(f"  {uuid}")
+            for c in chars:
+                print(f"      {c}")
+        print(f"\n{len(result.services)} service(s).")
+    print(f"\n{result.verdict}")
+    return 0 if result.connected and result.family_5x else 1
+
+
+def _cmd_ble_record(settings: Settings, args: argparse.Namespace) -> int:
+    """Record a live HR session from the strap into raw_events (Adapter B).
+
+    Standard SIG Heart Rate only — no proprietary protocol. The RR intervals it
+    carries are what yield a textbook HRV figure, which is the objective
+    measurement the calibration play compares against WHOOP's own (§5).
+    """
+    try:
+        from ..adapters.whoop_ble.record import record_session, store_session
+    except ImportError:
+        print("BLE support needs the optional extra:  pip install -e '.[ble]'", file=sys.stderr)
+        return 2
+
+    seconds = args.minutes * 60.0
+    print(f"Recording from {args.address} for {args.minutes:.0f} min — keep the strap on.")
+    try:
+        session = record_session(args.address, seconds=seconds)
+    except Exception as exc:
+        print(f"BLE session failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    if session.errors:
+        # Surfaced, never swallowed: a confident HRV number computed from a
+        # silently thinned sample is worse than a smaller honest one.
+        print(f"  {len(session.errors)} unparseable frame(s) — kept in the raw payload")
+    print(f"  {session.beats} beat notification(s), {session.rr_count} RR interval(s)")
+    if session.rr_count == 0:
+        print(
+            "  No RR intervals in this session. Heart rate alone gives no HRV, so "
+            "this will normalize to a resting-HR row and nothing more."
+        )
+
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        row_id, inserted = store_session(conn, session, user_id=settings.user_id)
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"  raw_events: {'stored' if inserted else 'already present'} ({row_id})")
+    print("\nNext:  coach normalize   (then `coach eval calibration` once you have a few)")
+    return 0
+
+
+def _food_client():
+    from ..adapters.foods.openfoodfacts import OpenFoodFactsClient
+
+    return OpenFoodFactsClient()
+
+
+def _cmd_food_search(_settings: Settings, args: argparse.Namespace) -> int:
+    """Search Open Food Facts by name or barcode (ROADMAP P12)."""
+    from ..adapters.foods.openfoodfacts import FoodSearchError
+    from ..normalize.foods import parse_openfoodfacts
+
+    client = _food_client()
+    try:
+        if args.query.strip().isdigit():
+            product = client.by_barcode(args.query.strip())
+            products = [product] if product else []
+        else:
+            products = client.search(args.query, page_size=args.limit)
+    except FoodSearchError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+    items = [i for i in (parse_openfoodfacts(p) for p in products) if i is not None]
+    if not items:
+        # Absence, stated as absence (§2.7). Products with no usable nutrition
+        # are filtered above, so say that rather than implying nothing matched.
+        print(f"No usable products for {args.query!r}.")
+        if products:
+            print(f"  ({len(products)} matched but carried no nutrition data)")
+        return 1
+
+    for i in items:
+        kcal = f"{i.kcal_per_100g:.0f}" if i.kcal_per_100g is not None else "?"
+        srv = f"  serving {i.serving_g:g} g" if i.serving_g else ""
+        print(f"  {i.external_id}  {kcal:>4} kcal/100g  {i.display}{srv}")
+    print(f"\n{len(items)} result(s).  Log one:  coach food log <barcode> --grams 100")
+    return 0
+
+
+def _cmd_food_log(settings: Settings, args: argparse.Namespace) -> int:
+    """Look a product up by barcode and record a portion of it."""
+    from ..adapters.foods.openfoodfacts import FoodSearchError
+    from ..normalize.foods import parse_openfoodfacts
+    from ..services.food_log import log_food
+
+    client = _food_client()
+    try:
+        product = client.by_barcode(args.barcode)
+    except (FoodSearchError, ValueError) as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+    if product is None:
+        print(f"No product with barcode {args.barcode}.", file=sys.stderr)
+        return 1
+    item = parse_openfoodfacts(product)
+    if item is None:
+        print(
+            f"Product {args.barcode} has no usable nutrition data — refusing to log "
+            "an entry with unknown calories.",
+            file=sys.stderr,
+        )
+        return 1
+
+    day = args.date or _today(settings)
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        logged = log_food(
+            conn,
+            item,
+            grams=args.grams,
+            day_key=day,
+            raw_payload=product,
+            user_id=settings.user_id,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    kcal = f"{logged.kcal:.0f} kcal" if logged.kcal is not None else "kcal unknown"
+    print(f"Logged {logged.grams:g} g {logged.description} on {day} — {kcal}")
+    return 0
+
+
+def _cmd_exercise_log(settings: Settings, args: argparse.Namespace) -> int:
+    """Record a training session by hand (P12, own logging)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from ..services.exercise_log import log_exercise
+
+    day = args.date or _today(settings)
+    tz = ZoneInfo(settings.home_tz)
+    # A session with no stated clock time is anchored at noon local. Deliberate:
+    # midnight would sit on a day boundary and could land the session on the
+    # wrong physiological day under an offset (§2.6).
+    at = args.at or "12:00"
+    try:
+        local = datetime.fromisoformat(f"{day}T{at}").replace(tzinfo=tz)
+    except ValueError:
+        print(f"could not read {day!r} + {at!r} as a date and time", file=sys.stderr)
+        return 2
+    raw_offset = local.strftime("%z")
+    offset: str | None = f"{raw_offset[:3]}:{raw_offset[3:]}" if raw_offset else None
+
+    conn = db.connect(settings.db_path)
+    try:
+        _ensure_migrated(conn)
+        try:
+            logged = log_exercise(
+                conn,
+                sport=args.sport,
+                duration_s=int(args.minutes * 60),
+                started_at=local.isoformat(),
+                utc_offset=offset,
+                tz_name=settings.home_tz,
+                kcal=args.kcal,
+                distance_m=args.distance_m,
+                user_id=settings.user_id,
+            )
+            conn.commit()
+        except ValueError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+
+    kcal = f", {logged.kcal:.0f} kcal" if logged.kcal is not None else ""
+    mapped = (
+        "" if logged.sport_type == args.sport.lower() else f" (recorded as {logged.sport_type})"
+    )
+    print(f"Logged {logged.duration_s // 60} min {args.sport}{mapped} on {logged.day_key}{kcal}")
+    if logged.kcal is None:
+        # Absence stated plainly (§2.7): no estimate is invented, and the user
+        # should know the day's energy balance does not include this session.
+        print("  No calories recorded — pass --kcal if you want them counted.")
+    return 0
+
+
 def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     """One-shot daily driver: incremental WHOOP + MFP (food+weight) + normalize.
 
@@ -865,20 +1212,30 @@ def _cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
             today=_today(settings),
             hk_file=Path(args.hk_file) if args.hk_file else None,
         )
-        for src in result.sources:
-            if src.skipped:
-                print(f"  {src.name}: {src.skipped} — skipped")
-                continue
-            since = f" (incremental since {src.since})" if src.since else ""
-            print(f"  {src.name}:{since}")
-            for key, c in src.counts.items():
-                if isinstance(c, dict):  # nested per-record-type counts
-                    print(f"    {key:18} inserted={c['inserted']:4d} skipped={c['skipped']:4d}")
-                else:
-                    print(f"    {key:18} {c}")
-        print("  normalize:", "  ".join(f"{k}={v}" for k, v in result.normalized.items()))
+        # Under --quiet a clean run says nothing at all. cron mails whatever a
+        # job writes to stdout, so a chatty success trains you to filter the
+        # mail, and then you miss the failure. Silence means "nothing to do".
+        verbose = not args.quiet or not result.ok
+        if verbose:
+            for src in result.sources:
+                if src.skipped:
+                    mark = "NEEDS ATTENTION" if src.needs_attention else "skipped"
+                    print(f"  {src.name}: {src.skipped} — {mark}")
+                    continue
+                since = f" (incremental since {src.since})" if src.since else ""
+                print(f"  {src.name}:{since}")
+                for key, c in src.counts.items():
+                    if isinstance(c, dict):  # nested per-record-type counts
+                        print(f"    {key:18} inserted={c['inserted']:4d} skipped={c['skipped']:4d}")
+                    else:
+                        print(f"    {key:18} {c}")
+            print("  normalize:", "  ".join(f"{k}={v}" for k, v in result.normalized.items()))
     finally:
         conn.close()
+    if not result.ok:
+        names = ", ".join(s.name for s in result.attention)
+        print(f"sync finished with sources needing attention: {names}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -979,6 +1336,7 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         # otherwise a target the user just set is invisible for the ten days it
         # takes TDEE to become measurable.
         _print_protein(p)
+        _print_disclaimer()
         return 0
     st = p["status"]
     print(f"  measured TDEE:    {st['tdee_kcal']:.0f} kcal/day")
@@ -999,6 +1357,7 @@ def _cmd_plan_status(settings: Settings, args: argparse.Namespace) -> int:
         )
     for a in st["alerts"]:
         print(f"  ⚠ {a['message']}")
+    _print_disclaimer()
     return 0
 
 
@@ -1124,10 +1483,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_backup.set_defaults(func=_cmd_db_backup)
     p_verify = db_sub.add_parser("verify", help="integrity check + row counts + fingerprint")
     p_verify.set_defaults(func=_cmd_db_verify)
+    p_rehearse = db_sub.add_parser(
+        "rehearse-restore",
+        help="prove a snapshot would restore (destroys nothing; safe on cron)",
+    )
+    p_rehearse.add_argument("snapshot", help="path to a backup produced by `coach db backup`")
+    p_rehearse.set_defaults(func=_cmd_db_rehearse_restore)
+    p_restore = db_sub.add_parser(
+        "restore", help="REPLACE the live DB with a snapshot (destructive; needs --yes)"
+    )
+    p_restore.add_argument("snapshot", help="path to a backup produced by `coach db backup`")
+    p_restore.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm the overwrite (§8.5). Without it, the command only explains itself.",
+    )
+    p_restore.set_defaults(func=_cmd_db_restore)
 
     p_auth = sub.add_parser("auth", help="authorize a data source")
     auth_sub = p_auth.add_subparsers(dest="auth_command", required=True)
     p_whoop = auth_sub.add_parser("whoop", help="run the WHOOP OAuth login")
+    p_whoop.add_argument(
+        "--headless",
+        action="store_true",
+        help=(
+            "no browser, no listening socket: print the URL and paste the redirect "
+            "back. Use this on a host (ADR-0019) — the default flow needs a desktop "
+            "browser and binds the redirect's port locally."
+        ),
+    )
     p_whoop.set_defaults(func=_cmd_auth_whoop)
 
     p_ingest = sub.add_parser("ingest", help="fetch a source into raw_events")
@@ -1257,7 +1641,70 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="ALSO ingest an Apple Health export (occasional weight backfill; not part of the daily path)",
     )
+    p_sync.add_argument(
+        "--quiet",
+        action="store_true",
+        help=(
+            "print nothing when everything worked; print everything when it did not. "
+            "For cron, which mails you whatever the job prints."
+        ),
+    )
     p_sync.set_defaults(func=_cmd_sync)
+
+    p_ble = sub.add_parser(
+        "ble", help="local Bluetooth read of the WHOOP strap (ADR-0012 spike; needs [ble])"
+    )
+    ble_sub = p_ble.add_subparsers(dest="ble_command", required=True)
+    p_bscan = ble_sub.add_parser("scan", help="list nearby BLE devices, likely-WHOOP first")
+    p_bscan.add_argument("--seconds", type=float, default=8.0, help="scan duration (default 8)")
+    p_bscan.set_defaults(func=_cmd_ble_scan)
+    p_bprobe = ble_sub.add_parser(
+        "probe", help="connect and enumerate GATT services (read-only; the ADR-0012 gate)"
+    )
+    p_bprobe.add_argument("address", help="address from `coach ble scan`")
+    p_bprobe.add_argument("--timeout", type=float, default=20.0)
+    p_bprobe.set_defaults(func=_cmd_ble_probe)
+    p_brec = ble_sub.add_parser(
+        "record", help="record a live HR session into raw_events (standard SIG HR; gives HRV)"
+    )
+    p_brec.add_argument("address", help="address from `coach ble scan`")
+    p_brec.add_argument(
+        "--minutes",
+        type=float,
+        default=5.0,
+        help="recording window (default 5). Longer is better for HRV: RMSSD needs a "
+        "few minutes of clean beats to mean anything.",
+    )
+    p_brec.set_defaults(func=_cmd_ble_record)
+
+    p_food = sub.add_parser("food", help="search and log food from Open Food Facts (P12)")
+    food_sub = p_food.add_subparsers(dest="food_command", required=True)
+    p_fs = food_sub.add_parser("search", help="search by product name, or look up a barcode")
+    p_fs.add_argument("query", help="product name, or a barcode (digits only)")
+    p_fs.add_argument("--limit", type=int, default=10)
+    p_fs.set_defaults(func=_cmd_food_search)
+    p_fl = food_sub.add_parser("log", help="record a portion of a product by barcode")
+    p_fl.add_argument("barcode")
+    p_fl.add_argument("--grams", type=float, required=True, help="portion size in grams")
+    p_fl.add_argument("--date", default=None, help="day_key (default: today)")
+    p_fl.set_defaults(func=_cmd_food_log)
+
+    p_ex = sub.add_parser("exercise", help="log a training session by hand (P12)")
+    ex_sub = p_ex.add_subparsers(dest="exercise_command", required=True)
+    p_el = ex_sub.add_parser("log", help="record a session")
+    p_el.add_argument("sport", help="strength, run, cycle, walk, hiit, swim, rowing, yoga, sport")
+    p_el.add_argument("--minutes", type=float, required=True)
+    p_el.add_argument("--date", default=None, help="day_key (default: today)")
+    p_el.add_argument("--at", default=None, help="local start time HH:MM (default: 12:00)")
+    p_el.add_argument(
+        "--kcal",
+        type=float,
+        default=None,
+        help="calories, if you know them. NOT estimated — a duration and a sport "
+        "cannot give energy expenditure for a specific body (ADR-0007).",
+    )
+    p_el.add_argument("--distance-m", type=float, default=None, dest="distance_m")
+    p_el.set_defaults(func=_cmd_exercise_log)
 
     p_plan = sub.add_parser("plan", help="set / show the cut/bulk plan (ADR-0013)")
     plan_sub = p_plan.add_subparsers(dest="plan_command", required=True)
@@ -1332,7 +1779,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
-    _configure_logging(settings.log_level)
+    # --quiet has to mean quiet, including the library logs. Found by running
+    # `coach sync --quiet` for real: it suppressed the command's own output and
+    # then printed fifteen httpx INFO lines anyway, which under cron is a nightly
+    # email about nothing — precisely the noise the flag exists to remove, and
+    # precisely how a real failure ends up filtered away unread.
+    level = "WARNING" if getattr(args, "quiet", False) else settings.log_level
+    _configure_logging(level)
     return int(args.func(settings, args))
 
 

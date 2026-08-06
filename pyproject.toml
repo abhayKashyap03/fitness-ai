@@ -29,6 +29,13 @@ web = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",  # FastAPI's required backend for HTML form posts
 ]
+# Local Bluetooth read of the WHOOP strap — Adapter B (ADR-0012), the
+# post-membership survival path. Optional on purpose: it pulls a platform BLE
+# stack that most users of the CLI have no need for, and nothing in the core
+# import path touches it. Signed off 2026-08-02 per §6.4.
+ble = [
+    "bleak>=0.22",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
@@ -57,7 +64,14 @@ coach = ["web/templates/*.html"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-target-version = "py314"
+# MUST match requires-python, not the dev interpreter. CLAUDE.md §3 permits
+# tracking the dev interpreter here, but that permission predates a real
+# consequence: at py314 the FORMATTER rewrites `except (A, B):` into PEP 758's
+# unparenthesized `except A, B:`, which is a SyntaxError on 3.11-3.13. The
+# package then installs on those versions (metadata allows it) and fails at
+# import. Two such lines had already shipped. Portability is what the floor is
+# for, so the floor is what this tracks.
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

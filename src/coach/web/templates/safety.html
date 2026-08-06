@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Coach · Safety{% endblock %}
+
+{% block content %}
+<h1>Before you use this</h1>
+
+{% if outdated %}
+<div class="alert">
+  This notice has changed since you last agreed to it (you accepted version
+  {{ ack.version }}; this is version {{ version }}). Please read it again.
+</div>
+{% endif %}
+
+<div class="card" style="max-width:44rem">
+  {# White-space preserved: the text is authored in coach/disclaimer.py as the
+     single source of truth, and is deliberately NOT re-marked-up here. Two
+     copies would drift, and the drift would be invisible — the user reads one
+     version while the model obeys another. #}
+  <pre style="white-space:pre-wrap;font:inherit;margin:0">{{ text }}</pre>
+</div>
+
+{% if ack and not outdated %}
+<div class="card" style="max-width:44rem;margin-top:1rem">
+  <p class="note">You accepted version {{ ack.version }} on
+    {{ ack.acknowledged_at[:10] }}. Nothing further is needed.</p>
+  <p><a href="/">Back to the dashboard</a></p>
+</div>
+{% else %}
+<div class="card" style="max-width:44rem;margin-top:1rem">
+  <form method="post" action="/safety">
+    <p class="note">Agreeing records the date and the version above against your
+      account. You can read this page again at any time from the footer.</p>
+    <p><button type="submit">I have read and understood this</button></p>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

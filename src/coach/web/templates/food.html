@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Coach · Log{% endblock %}
+
+{% block content %}
+<h1>Log</h1>
+<p class="note">Open Food Facts — free and open. Search by product name, or paste
+  a barcode straight from a packet.</p>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if logged %}
+<div class="card" style="margin-bottom:1rem">
+  Logged <strong>{{ logged.grams|round(0)|int }} g {{ logged.description }}</strong>
+  on {{ logged.day_key }} —
+  {% if logged.kcal is not none %}{{ logged.kcal|round(0)|int }} kcal{% else %}<span class="absent">kcal unknown</span>{% endif %}
+</div>
+{% endif %}
+
+<div class="card" style="max-width:34rem">
+  <form method="get" action="/food">
+    <label for="q">Search</label>
+    <input id="q" name="q" value="{{ query or '' }}" placeholder="porridge oats, or 3017620422003" autofocus>
+    <p style="margin-top:.7rem"><button type="submit">Search</button></p>
+  </form>
+</div>
+
+{% if results is not none %}
+  {% if not results %}
+    {# Absence rendered as absence (§2.7) — never an empty table that looks like
+       a result set. #}
+    <p class="absent" style="margin-top:1rem">No usable products for “{{ query }}”.</p>
+  {% else %}
+  <div class="card" style="margin-top:1rem">
+    <h2>{{ results|length }} result(s)</h2>
+    {% for item in results %}
+    <div class="row" style="align-items:center;border-top:1px solid var(--line);padding:.6rem 0">
+      <div class="k" style="color:var(--fg)">
+        {{ item.display }}<br>
+        <span class="note">
+          {% if item.kcal_per_100g is not none %}{{ item.kcal_per_100g|round(0)|int }} kcal/100 g{% else %}<span class="absent">kcal unknown</span>{% endif %}
+          {% if item.serving_g %} · serving {{ item.serving_g|round(0)|int }} g{% endif %}
+        </span>
+      </div>
+      <form method="post" action="/food" style="display:flex;gap:.4rem;align-items:center;margin:0">
+        <input type="hidden" name="barcode" value="{{ item.external_id }}">
+        <input type="number" name="grams" min="1" step="1"
+               value="{{ (item.serving_g or 100)|round(0)|int }}"
+               style="width:6rem" aria-label="grams">
+        <button type="submit">Log</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endif %}
+
+<h2 style="margin-top:1.6rem">Training</h2>
+<div class="card" style="max-width:34rem">
+  {% if logged_exercise %}
+  <p>Logged <strong>{{ logged_exercise.duration_s // 60 }} min {{ logged_exercise.sport_type }}</strong>
+     on {{ logged_exercise.day_key }}{% if logged_exercise.kcal is not none %} — {{ logged_exercise.kcal|round(0)|int }} kcal{% endif %}.</p>
+  {% if logged_exercise.kcal is none %}
+  {# Absence said out loud (§2.7). No estimate is invented from duration + sport
+     (ADR-0007), so the user should know this session is not in the day's balance. #}
+  <p class="note">No calories recorded — this session does not count toward energy balance.</p>
+  {% endif %}
+  {% endif %}
+  <form method="post" action="/exercise">
+    <label for="sport">Sport</label>
+    <input id="sport" name="sport" placeholder="strength, run, cycle, walk, hiit…" required>
+    <label for="minutes">Minutes</label>
+    <input id="minutes" name="minutes" type="number" min="1" step="1" value="45" required>
+    <label for="ex_kcal">Calories <span class="note">(optional — never estimated)</span></label>
+    <input id="ex_kcal" name="kcal" type="number" min="0" step="1" placeholder="leave blank if unknown">
+    <p style="margin-top:.7rem"><button type="submit">Log session</button></p>
+  </form>
+</div>
+{% endblock %}

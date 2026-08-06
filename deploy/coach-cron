@@ -1,0 +1,46 @@
+# Scheduled jobs for the coach host (ADR-0019 §5).
+#
+#   Install:  sudo cp deploy/coach-cron /etc/cron.d/coach
+#             sudo chmod 644 /etc/cron.d/coach
+#
+# Nothing in the repo schedules anything — that was called out as a gap when
+# hosting was decided. This is the whole scheduler.
+#
+# CRON MAILS YOU WHATEVER A JOB PRINTS. That is the entire design here:
+#   * `sync --quiet` prints NOTHING when it worked, so mail arriving means
+#     something needs you. A chatty success trains you to filter the mail, and
+#     then you miss the failure.
+#   * `sync` exits non-zero when a source needs attention (a revoked token, a
+#     source that has never ingested) as distinct from merely being
+#     unconfigured. Before that distinction existed, a dead credential ingested
+#     nothing every night and cron called it success every night.
+#
+# Set this to an address you actually read. With MAILTO empty, every failure
+# below is silent, which defeats the point.
+MAILTO=you@example.com
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+COACH=/home/coach/fitness-ai/.venv/bin/coach
+
+# --- daily sync -------------------------------------------------------------
+# 06:10 local. After the strap has uploaded the night's recovery, before the
+# morning is over. Not on the hour: everyone's cron runs on the hour.
+10 6 * * *  coach  cd /home/coach/fitness-ai && $COACH sync --quiet
+
+# --- nightly backup ---------------------------------------------------------
+# The snapshot the laptop pulls. `db backup` never overwrites an existing file,
+# so a repeated run cannot destroy the copy you needed.
+30 2 * * *  coach  cd /home/coach/fitness-ai && $COACH db backup >/dev/null
+
+# --- weekly restore rehearsal ----------------------------------------------
+# ADR-0019 §5: an untested backup is a belief, not a backup. This proves the
+# most recent snapshot would actually come back, and destroys nothing, so there
+# is no reason not to run it. Sundays 03:00.
+#
+# It prints on failure and exits non-zero, so cron mails you the week your
+# backups quietly stopped being restorable.
+0 3 * * 0  coach  cd /home/coach/fitness-ai && $COACH db rehearse-restore "$(ls -t data/backups/*.db | head -1)" >/dev/null
+
+# --- monthly: prune expired sessions ---------------------------------------
+# Housekeeping only. Expired sessions are already unusable; this stops the table
+# growing without bound.
+0 4 1 * *  coach  cd /home/coach/fitness-ai && $COACH db verify >/dev/null

@@ -123,8 +123,7 @@ def doctor_report(settings: Settings) -> DoctorReport:
 
 
 def _whoop_check(settings: Settings) -> Check:
-    from ..adapters.whoop.auth import TokenStore
-    from ..paths import whoop_token_path
+    from .credentials import whoop_token_store
 
     try:
         settings.require_whoop()
@@ -132,7 +131,7 @@ def _whoop_check(settings: Settings) -> Check:
         return Check(
             "whoop", "whoop", PROBLEM, "not configured (WHOOP_CLIENT_ID/SECRET in .env)"
         )
-    store = TokenStore(whoop_token_path(settings.user_id))
+    store = whoop_token_store(settings)
     tokens = store.load() if store.exists() else None
     if tokens is None:
         return Check("whoop", "whoop", PROBLEM, "credentials ok, token MISSING — run `coach auth whoop`")

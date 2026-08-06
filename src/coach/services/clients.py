@@ -23,16 +23,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 def whoop_client(settings: Settings) -> WhoopClient:
     """WHOOP API client backed by the stored OAuth token (auto-refreshing)."""
-    from ..adapters.whoop.auth import TokenStore, WhoopOAuth
+    from ..adapters.whoop.auth import WhoopOAuth
     from ..adapters.whoop.client import WhoopClient
-    from ..paths import whoop_token_path
+    from .credentials import whoop_token_store
 
     oauth = WhoopOAuth(
         settings.whoop_client_id,
         settings.whoop_client_secret,
         settings.whoop_redirect_uri,
     )
-    store = TokenStore(whoop_token_path(settings.user_id))
+    # One seam decides file-vs-encrypted (ADR-0018 §3, services/credentials.py).
+    store = whoop_token_store(settings)
     return WhoopClient(lambda: oauth.valid_access_token(store))
 
 

@@ -1,0 +1,63 @@
+# systemd unit for the coach web app (ADR-0019 §4).
+#
+#   Install:  sudo cp deploy/coach-web.service /etc/systemd/system/
+#             sudo systemctl daemon-reload
+#             sudo systemctl enable --now coach-web
+#   Logs:     journalctl -u coach-web -f
+#
+# Adjust User and the two paths; everything else should hold as-is.
+
+[Unit]
+Description=Coach web dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=coach
+Group=coach
+WorkingDirectory=/home/coach/fitness-ai
+
+# Secrets come from the environment file, never from this unit — a unit file is
+# world-readable and ends up in journald and in `systemctl cat` (§8.4).
+# COACH_SECRET_KEY lives here: it is the key that decrypts per-user source
+# credentials, and ADR-0018 requires it to be in the host environment and never
+# in the database, so a stolen dump yields ciphertext alone.
+EnvironmentFile=/home/coach/fitness-ai/.env
+
+# Bind loopback ONLY. Caddy is the only thing that should reach this, and a
+# public bind here would quietly bypass TLS entirely.
+#
+# 127.0.0.1 also means the app's own startup refusal (non-loopback bind with no
+# claimed account) is not what protects this deployment — the bind address is.
+# Both together: defence that does not depend on remembering.
+ExecStart=/home/coach/fitness-ai/.venv/bin/coach web --host 127.0.0.1 --port 8765
+
+Restart=on-failure
+RestartSec=5s
+
+# --- hardening -------------------------------------------------------------
+# This process reads one person's health data and holds the key to their WHOOP
+# and MyFitnessPal credentials. It needs almost nothing from the system.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# The only writable paths: the database directory and its backups. ProtectHome
+# is read-only above, so this is the deliberate exception.
+ReadWritePaths=/home/coach/fitness-ai/data
+
+[Install]
+WantedBy=multi-user.target

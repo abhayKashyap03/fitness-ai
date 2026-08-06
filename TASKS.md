@@ -9,8 +9,20 @@ Legend: 🔒 = one-way door, think hard · 🧑 = needs the human · ⏭️ = sk
 
 ## ▶ NEXT UP (start here — updated 2026-08-02)
 
-State: **suite green · ruff + mypy clean · schema v14 · PRs #12–#29 merged; #30
-(web auth) open for review.**
+State: **800 tests green · ruff + mypy clean · schema v15 · PRs #12–#29 merged;
+#30 (web auth) and #31 (hosting + BLE + food) open for review.**
+
+**🎉 The BLE gate PASSED on the real MG strap (2026-08-03).** ADR-0012 is
+ACCEPTED and risk #10.1 — the biggest technical risk in the project — is retired.
+`fd4b0001` present (chars `0002-0005`, `0007`; **no `0006`**), plus **standard
+SIG Heart Rate `180d`/`2a37`**, so live HR and textbook HRV need no reverse
+engineering. `coach ble record` writes `whoop_ble` sibling rows.
+
+**#31 delivers every hosting prerequisite that does not need a purchase**:
+medical disclaimers (ADR-0020, migration 0015), `coach db rehearse-restore` +
+`restore`, `coach auth whoop --headless`, cron-ready `coach sync --quiet` with a
+truthful exit code, and `deploy/` + [docs/DEPLOY.md](docs/DEPLOY.md). Follow the
+runbook once a VPS exists.
 
 **Read [ADR-0019](docs/adr/0019-hosting-the-owners-instance.md) before planning
 any hosting work.** It amends ADR-0018: the hosted instance is **the owner's
@@ -29,19 +41,28 @@ Near-term, in priority order:
    and **no password**. Once #30 merges, `coach web --host 0.0.0.0` **refuses to
    start** without one — phone access over the LAN breaks until it is set.
    `coach user set-password` (prompts, no echo, no flag).
-2. **Hosting, in the order ADR-0019 forces:** VPS → domain → TLS → headless
-   OAuth → migrate → cron sync → **rehearse restore**. Domain + TLS are
-   prerequisites, not polish (WHOOP is authorised on the host at
-   `https://<domain>/callback`). Blocking sub-item: `run_login` opens a browser
-   and binds a local `HTTPServer` — **it cannot run headless**, a variant is needed.
-3. **BLE spike (Adapter B)** — the subscription-survival play, and the membership
-   clock is running (recon 2026-07-25 said ~9 months). **Not blocked on hardware**
-   — the strap is worn daily. Blocked only on doing it, plus `bleak` needing §6.4
-   sign-off. Unlocks `compute/calibration.py` (built, no live caller: nothing to
-   compare against until `whoop_ble` sibling rows exist).
-4. **🧑 D6** — may the model author its own coaching notes? Recommendation: stay closed.
-5. **⏳ Plan layer TDEE-backed goal** — no code; accrues with logging.
-6. **⏭️ Phase 6B — MFP CSV backfill** — secondary; the daily v2 API path covers current data.
+2. **🧑 Buy the VPS and register the domain**, then work
+   [docs/DEPLOY.md](docs/DEPLOY.md) top to bottom. Everything else in the chain
+   is built and tested (#31): headless OAuth, restore + rehearsal, cron sync,
+   proxy/systemd/cron artifacts. Step 9 makes you drill a real restore by hand
+   while nothing is wrong — do not skip it.
+3. **🧑 Record a real BLE session.** `coach ble record <addr> --minutes 5`, run
+   in **your own terminal** — the agent's process is refused Bluetooth by macOS
+   TCC. The number that matters is **RR intervals**: zero means the strap streams
+   HR without the RR bit and HRV is unavailable this way (a real finding either
+   way; the command says so rather than inventing a figure). A few sessions then
+   make `coach eval calibration` meaningful for the first time — `whoop_api` vs
+   `whoop_ble` is the honest cross-instrument pair it has never had.
+4. **BLE historical drain** — richer than live HR, and the ~14-day on-strap
+   buffer makes the time-sliced calibration lossless. **Do not assume
+   `fd4b0006`** — this MG does not expose it. Untested on macOS/CoreBluetooth
+   (whoop-vault is Linux/BlueZ only).
+5. **🧑 D6** — may the model author its own coaching notes? Recommendation: stay closed.
+6. **⏳ Plan layer TDEE-backed goal** — no code; accrues with logging.
+7. **USDA FoodData Central** — a clean seam beside `adapters/foods/openfoodfacts.py`;
+   needs a free API key. Open Food Facts covers barcoded packaged food; USDA is
+   what covers raw ingredients.
+8. **⏭️ Phase 6B — MFP CSV backfill** — secondary; the daily v2 API path covers current data.
 
 Phases 0–7.5 done. The coach answers grounded questions live, *steers* (cut/bulk
 plan → daily calorie goal + adherence), and has a **web dashboard** (`coach web`,

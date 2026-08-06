@@ -33,7 +33,11 @@ from fastapi.templating import Jinja2Templates
 
 from ..coach import tools
 from ..config import ConfigError, Settings, load_settings
+from ..disclaimer import DISCLAIMER_VERSION
+from ..disclaimer import FULL as DISCLAIMER_FULL
+from ..disclaimer import SHORT as DISCLAIMER_SHORT
 from ..store import db
+from ..store import disclaimer as D
 from ..store import users as U
 from .auth import (
     AuthPolicy,
@@ -77,6 +81,14 @@ def _uid() -> int:
 # protected the moment it is added rather than the moment someone remembers.
 _PUBLIC_PREFIXES = ("/login", "/invite", "/healthz", "/static")
 
+# Reachable while signed in but before the medical disclaimer is acknowledged.
+#
+# The notice page itself, obviously — and **/logout**, because a gate you cannot
+# retreat from is a trap: a user who does not want to accept must still be able
+# to leave. /healthz stays out of the gate for the same reason it is public: a
+# reverse proxy's health check is not a person and cannot agree to anything.
+_PRE_ACK_PREFIXES = ("/safety", "/logout", "/healthz", "/static")
+
 
 def _same_origin(request: Request) -> None:
     """Refuse cross-origin state changes.
@@ -114,6 +126,10 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
         version="0.1.0",
     )
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # A Jinja global, not a per-route context key: the footer must appear on
+    # every page, and threading it through two dozen context dicts means the
+    # next page added is the one that silently ships without it.
+    templates.env.globals["disclaimer_short"] = DISCLAIMER_SHORT
     runner = JobRunner()
     app.state.jobs = runner
 
@@ -157,6 +173,21 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "authentication required"}, status_code=401)
             return RedirectResponse("/login", status_code=303)
+
+        # §8.6: no advice surface renders a number until this user has agreed to
+        # the notice that says what the numbers are worth. Placed here, in the
+        # middleware, for the same reason authentication is: a page added
+        # tomorrow is gated by existing rather than by remembering.
+        if not path.startswith(_PRE_ACK_PREFIXES):
+            with _conn() as conn:
+                acked = D.has_acknowledged(conn, user_id=user.id)
+            if not acked:
+                if path.startswith("/api/"):
+                    return JSONResponse(
+                        {"detail": "medical disclaimer not acknowledged", "see": "/safety"},
+                        status_code=403,
+                    )
+                return RedirectResponse("/safety", status_code=303)
 
         token = _REQUEST_USER.set(user)
         request.state.user = user  # templates read this for the nav / sign-out
@@ -252,6 +283,44 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
     def healthz() -> dict:
         """Liveness only. Deliberately says nothing about users or data."""
         return {"ok": True}
+
+    # ---- medical disclaimer (§8.6) ----------------------------------------
+
+    @app.get("/safety", response_class=HTMLResponse)
+    def page_safety(request: Request) -> Any:
+        """The notice. Blocking on first visit, readable forever after.
+
+        Stays reachable once acknowledged on purpose — a disclaimer you can only
+        see at the moment you are dismissing it is designed not to be read.
+        """
+        with _conn() as conn:
+            ack = D.latest(conn, user_id=_uid())
+        return templates.TemplateResponse(
+            request=request,
+            name="safety.html",
+            context={
+                "nav": "safety",
+                "text": DISCLAIMER_FULL,
+                "version": DISCLAIMER_VERSION,
+                "ack": ack,
+                # An old acknowledgement is not consent to the current text, and
+                # the page says which case the reader is in rather than showing
+                # an undifferentiated tick.
+                "outdated": ack is not None and ack.version != DISCLAIMER_VERSION,
+            },
+        )
+
+    @app.post("/safety", dependencies=[Depends(_same_origin)])
+    def post_safety(request: Request) -> Any:
+        with _conn() as conn:
+            D.acknowledge(
+                conn,
+                user_id=_uid(),
+                version=DISCLAIMER_VERSION,
+                user_agent=request.headers.get("user-agent"),
+            )
+            conn.commit()
+        return RedirectResponse("/", status_code=303)
 
     # ---- JSON API ---------------------------------------------------------
     # The contract a future iOS app (P13) consumes. Each route is a thin pass
@@ -452,6 +521,139 @@ def create_app(settings: Settings | None = None, *, bind_host: str = "127.0.0.1"
                 "weight": weight,
                 "safety": safety,
                 "sessions": sessions,
+            },
+        )
+
+    # ---- food logging (P12) ----------------------------------------------
+    # Presentation only, like every other route here: the search, the parsing
+    # and the write all live in the adapter/normalizer/service the CLI uses, so
+    # the two surfaces cannot drift the way `plan set` once did.
+
+    def _food_search(query: str):
+        from ..adapters.foods.openfoodfacts import FoodSearchError, OpenFoodFactsClient
+        from ..normalize.foods import parse_openfoodfacts
+
+        client = OpenFoodFactsClient()
+        try:
+            if query.strip().isdigit():
+                product = client.by_barcode(query.strip())
+                raw = [product] if product else []
+            else:
+                raw = client.search(query, page_size=12)
+        except (FoodSearchError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        finally:
+            client.close()
+        return [i for i in (parse_openfoodfacts(p) for p in raw) if i is not None]
+
+    @app.get("/food", response_class=HTMLResponse)
+    def page_food(request: Request, q: str | None = Query(default=None)) -> Any:
+        # `results is None` means "no search run yet", distinct from an empty
+        # list meaning "searched, found nothing" (§2.7). The template renders
+        # them differently on purpose.
+        results = None
+        error = None
+        if q and q.strip():
+            try:
+                results = _food_search(q)
+            except HTTPException as exc:
+                error = str(exc.detail)
+        return templates.TemplateResponse(
+            request=request,
+            name="food.html",
+            context={"nav": "food", "query": q, "results": results, "error": error, "logged": None, "logged_exercise": None},
+        )
+
+    @app.post("/food", response_class=HTMLResponse, dependencies=[Depends(_same_origin)])
+    def submit_food(
+        request: Request, barcode: str = Form(...), grams: float = Form(...)
+    ) -> Any:
+        from ..adapters.foods.openfoodfacts import FoodSearchError, OpenFoodFactsClient
+        from ..normalize.foods import parse_openfoodfacts
+        from ..services.food_log import log_food
+
+        client = OpenFoodFactsClient()
+        try:
+            product = client.by_barcode(barcode)
+        except (FoodSearchError, ValueError) as exc:
+            product = None
+            error: str | None = str(exc)
+        else:
+            error = None
+        finally:
+            client.close()
+
+        item = parse_openfoodfacts(product) if product else None
+        logged = None
+        if item is None and error is None:
+            error = f"No usable nutrition data for barcode {barcode} — not logged."
+        elif item is not None:
+            with _conn() as conn:
+                logged = log_food(
+                    conn,
+                    item,
+                    grams=grams,
+                    day_key=_today(cfg),
+                    raw_payload=product or {},
+                    user_id=_uid(),
+                )
+                conn.commit()
+        return templates.TemplateResponse(
+            request=request,
+            name="food.html",
+            context={
+                "nav": "food",
+                "query": None,
+                "results": None,
+                "error": error,
+                "logged": logged,
+                "logged_exercise": None,
+            },
+        )
+
+    @app.post("/exercise", response_class=HTMLResponse, dependencies=[Depends(_same_origin)])
+    def submit_exercise(
+        request: Request,
+        sport: str = Form(...),
+        minutes: float = Form(...),
+        kcal: str = Form(default=""),
+    ) -> Any:
+        """Hand-log a training session. Same service seam the CLI uses."""
+        from ..services.exercise_log import log_exercise
+
+        day = _today(cfg)
+        # Noon local, for the same reason the CLI does it: midnight sits on a day
+        # boundary and could put the session on the wrong physiological day.
+        local = datetime.fromisoformat(f"{day}T12:00").replace(tzinfo=ZoneInfo(cfg.home_tz))
+        raw_off = local.strftime("%z")
+        logged_exercise = None
+        error: str | None = None
+        with _conn() as conn:
+            try:
+                logged_exercise = log_exercise(
+                    conn,
+                    sport=sport,
+                    duration_s=int(minutes * 60),
+                    started_at=local.isoformat(),
+                    utc_offset=f"{raw_off[:3]}:{raw_off[3:]}" if raw_off else None,
+                    tz_name=cfg.home_tz,
+                    # Blank means unknown, not zero (§2.7) — no estimate is made.
+                    kcal=float(kcal) if kcal.strip() else None,
+                    user_id=_uid(),
+                )
+                conn.commit()
+            except ValueError as exc:
+                error = str(exc)
+        return templates.TemplateResponse(
+            request=request,
+            name="food.html",
+            context={
+                "nav": "food",
+                "query": None,
+                "results": None,
+                "error": error,
+                "logged": None,
+                "logged_exercise": logged_exercise,
             },
         )
 

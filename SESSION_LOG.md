@@ -200,6 +200,246 @@ start** — LAN phone access breaks until `coach user set-password` is run.
 
 ---
 
+## Session 2026-08-02 (d) — hosting prerequisites: everything except the credit card (PR #31)
+
+Asked to take the project to the finish in one run. **It cannot be** — and the
+reasons are structural, not effort: buying a VPS and registering a domain are
+purchases; the BLE spike needs a radio talking to the strap; P9's recovery
+engine is pre-registered to n=150 HRV days (72 today) and building it now would
+destroy the pre-registration decided the same day; App Store and legal review
+are the human's. So the work taken was the slice that is needed under **every**
+branch: everything ADR-0019's hosting plan requires that does not need a card.
+
+Four commits on `feat/medical-disclaimers`, stacked on #30.
+
+**1. Medical disclaimer on every advice surface** —
+[ADR-0020](docs/adr/0020-medical-disclaimer.md), migration 0015. Discharges
+ADR-0018's prerequisite. Only the invite form carried a notice; the dashboard,
+plan page and coach chat carried nothing. One canonical text now feeds the web
+UI, the CLI and the model's `SYSTEM_PROMPT`, so the user and the model are
+provably held to the same scope — this repo has shipped the
+same-logic-in-two-places bug twice already, and here it would be invisible from
+both sides. Acknowledgement is **recorded and versioned**; a footer nobody reads
+is the failure the auth work already rejected. Gate lives in the middleware,
+covers `/api/`, and leaves `/logout` reachable — a gate you cannot retreat from
+is a trap. **Applies to open-local too**: that allowance is about credentials,
+this is about advice.
+
+**2. Rehearsed restore** — `coach db rehearse-restore` (destroys nothing, safe
+on cron) and `coach db restore --yes`. ADR-0019 §5 demanded a rehearsal and
+there was nothing to rehearse with. The real restore verifies the snapshot
+**before** touching anything and **preserves** the database it replaces (§8.5).
+A stale backup is reported as a *delta*, not a failure — calling a
+behind-by-a-day backup broken trains you to ignore the check.
+
+**3. Headless WHOOP OAuth** — `coach auth whoop --headless`. `run_login` opens
+a browser and binds a local socket; neither exists on a VPS. Both flows share
+one `_exchange()`, because a headless path that forgot the state check would be
+a real vulnerability no test of the laptop path would catch. A bare code is
+refused: state is the only proof the code came from the login you started.
+
+**4. Cron-ready sync + deploy artifacts + runbook** — Caddyfile, systemd unit
+(loopback-bound, hardened), cron file, a laptop-side `pull-backup.sh` that
+**pulls** so the host holds no credential that can write to the archive, and
+[docs/DEPLOY.md](docs/DEPLOY.md) in ADR-0019's forced order.
+
+### Two real bugs, both found by running it rather than by a test
+- **`run_sync` conflated "not configured" with "auth needed"** and always exited
+  0. Moved to cron, a revoked token would ingest nothing every night while the
+  job reported success every night — a silent failure with no upper bound.
+  `needs_attention` now separates them and sync exits 1.
+- **`--quiet` was not quiet.** It suppressed the command's own output and then
+  printed fifteen httpx INFO lines — a nightly email about nothing, which is how
+  a real failure ends up filtered away unread.
+
+Also fixed: both restore commands raised a raw `sqlite3` traceback on a corrupt
+snapshot. Data was intact, but a stack trace mid-incident does not answer the
+only question that matters ("did my live database survive?").
+
+**724 green (+56); ruff + mypy clean.** Live-verified against the real DB and
+real APIs: disclaimer gate end to end; rehearsal against a real snapshot (2402
+raw_events, fingerprint identical) and a full restore drilled into a scratch
+target; `coach sync --quiet` silent, exit 0.
+
+⚠️ **The live database is now at v15** — that sync applied migration 0015
+(additive, forward-only). The web app will therefore ask you to accept the
+safety notice once.
+
+**Two existing tests were changed, not deleted** (§6.2), both behaviourally:
+`test_localhost_with_no_account_claimed_still_works` acknowledges first, and
+`test_invite_link_creates_an_account_and_signs_in` now asserts a new account
+gets 403 until it accepts.
+
+### Still needs the human
+- **VPS + domain** — purchases; not something I can do.
+- **Owner password** — `coach web --host 0.0.0.0` refuses to start without one.
+- **BLE spike** — `bleak` signed off and the strap is worn daily, but the
+  acceptance gate is empirical and wants someone at the keyboard.
+
+---
+
+## Session 2026-08-03 (c) — own logging completed; two rebuild bugs; what is NOT done
+
+### The §2.1 bug, and its twin
+
+**Own-logged food did not survive `normalize --rebuild`.** The raw event stored
+only the *product*, so the portion size existed nowhere in raw — a rebuild
+dropped every logged meal and could not bring one back. `raw_events` was intact
+throughout, so nothing was permanently lost, but §2.1's rule is that canonical is
+**fully regenerable**, and it was not. Found by running a rebuild, not by a test.
+
+The fix reframes what the raw event *is*: the **logging act** (product + grams +
+day + time), not the encyclopaedia entry it referenced. `parse_food_log()`
+reproduces the row; the runner re-derives it. Fingerprint now identical across a
+rebuild, asserted by a test.
+
+**The twin, caught by that same assertion** while building exercise logging: the
+write path left `session_group_id` unset while the rebuild assigned it, so the
+two produced different canonical state from identical raw. It mattered
+independently too — a hand-logged session for a workout the strap also caught
+would be **counted twice** (§5's expected bug class) until the next normalize.
+`regroup_workouts` is now public and both paths call it.
+
+**The distinction worth carrying forward:** `plan` and `coach_note` are genuinely
+user-authored — no `raw_ref`, absent from the rebuild. `food_entry` and `workout`
+are **raw-derived tables the rebuild owns**. Anything landing in them needs a raw
+event sufficient to rebuild from. Food got this wrong because it *felt*
+user-authored.
+
+### Shipped
+- **In-app exercise logging** — `coach exercise log`, plus the web form. Written
+  rebuild-safe from the start; the rebuild test was the first check written.
+  **No calorie estimate is ever invented** (ADR-0007) and `strain` is never
+  synthesised (ADR-0015). Unknown sports become `other` rather than being
+  rejected, with the user's own word kept in `source_sport_raw`.
+- **Web Log page** — food search/log and training in one place, so own logging
+  works from a phone (risk #8).
+
+### What is NOT done — the honest list
+The instruction was to finish the whole app. It is not finished. Blocked, with
+the blocker verified rather than assumed:
+
+| | Why |
+|---|---|
+| **P13 iOS app** | **Xcode is not installed** — only CommandLineTools, and `xcodebuild` errors out. No simulators. Swift could be written but not compiled, run, or verified. ~7 GB App Store install, human-only. |
+| **BLE historical drain** | Writable, **not verifiable**. Reconstructing a CRC16/CRC32 framed protocol with a handshake from a one-paragraph ADR summary, with no way to test against the strap, produces code that looks finished and probably isn't. Also: **`fd4b0006` is absent on MG**. |
+| **`coach ble record` live** | macOS TCC refuses the agent's process; the grant reached the human's own terminal. |
+| **USDA FoodData Central** | Needs a free API key this install does not have. Clean seam exists beside the OFF adapter. |
+| **VPS + domain** | Purchases. Everything downstream is built (`docs/DEPLOY.md`). |
+| **P14 launch** | App Store account, legal review. |
+| **P9 recovery engine** | Correctly gated at the pre-registered n=150 HRV days (72 today) — building it now would destroy the pre-registration. |
+
+**800 green; ruff + mypy clean.** 19 commits on `feat/medical-disclaimers` → PR #31.
+
+---
+
+## Session 2026-08-03 (b) — Adapter B ingest, encrypted credentials, own food logging
+
+Continued straight through after the gate passed. Four more commits.
+
+**BLE live-HR ingest (`coach ble record`).** The gate turned up something better
+than the plan assumed: standard SIG Heart Rate (`180d`/`2a37`) carries **RR
+intervals**, and RR intervals are what HRV is computed from. So a textbook
+`hrv_rmssd_ms` is available from an independent instrument with **no reverse
+engineering at all** — 2a37 is a public spec WHOOP cannot quietly change without
+breaking every generic HR app. That is §5's "objective measurement, comparable
+across sources" arriving from Adapter B, which is the whole calibration play.
+Writes `whoop_ble` sibling rows; wired into `normalize_all` so `--rebuild`
+covers it.
+- **No composite score is emitted, deliberately.** A "textbook recovery score"
+  in the same column would look like WHOOP's number and not be it. `score` is
+  NULL; `score_method='textbook'`, `is_official=0`.
+- Care where a wrong answer looks plausible: RR arrives in **1/1024 s ticks**
+  (treating them as ms scales every HRV figure by 2.4% and nothing looks
+  broken); energy-expended sits *between* HR and the RR block; artefacts are
+  filtered *before* the sufficiency check; thin data yields None, not a small
+  number. +25 tests, byte-level against the SIG layout.
+- ⚠️ **Not live-verified.** Recording needs the radio and this agent's process
+  is still refused Bluetooth by macOS TCC — the grant reached the human's own
+  Terminal, not the agent's. Parser, HRV math and normalizer are covered
+  offline; the notification subscription itself is unproven.
+
+**Credentials into the encrypted store** (`services/credentials.py`). ADR-0018
+built `user_secret` and nothing was wired to it. The rule: **if
+`COACH_SECRET_KEY` is configured, the database wins** — not a flag, because a
+flag makes the secure path the one you have to remember. Migration **moves**: an
+existing file is adopted on first load, then renamed aside (never deleted, §8.5).
+Once the DB holds a value it wins outright, so a stale file cannot override a
+rotated token.
+
+**Own food logging on Open Food Facts (P12).** The sanctioned nutrition path —
+MFP is a personal-only override (ADR-0010) that must never ship. `coach food
+search|log` plus a **Food page in the dashboard**, because logging from a CLI
+over SSH is not a food-logging feature (risk #8). The 0002 schema already listed
+`openfoodfacts` as a valid source, so no migration.
+- The dominant risk is **unknown macros silently becoming zero**. Crowd-sourced
+  products are half-filled, and defaulting fibre to 0.0 under-reports intake in
+  exactly the direction self-reporting is already biased (risk #7). Unknown
+  stays None through parsing, scaling and into a NULL column.
+- Live-verified against the real API: Nutella logged with `protein=1.9,
+  fiber=NULL` beside Coke with `protein=0.0`. **Those two zeros mean different
+  things**, and both survive to the day total.
+- **USDA FoodData Central is a clean seam, not built** — one vertical slice
+  beats two half-built ones (§3), and it needs an API key this install lacks.
+
+### A pre-existing portability bug, found on the way
+`ruff`'s `target-version` was `py314` while `requires-python` is `>=3.11`. At
+py314 the **formatter rewrites** `except (A, B):` into PEP 758's unparenthesized
+`except A, B:` — a **SyntaxError on 3.11–3.13**. Two such lines had already
+shipped (`normalize/myfitnesspal.py:113` predates this session). The package
+installs on those versions, because the metadata allows it, and then fails at
+import. Both fixed; `target-version` now tracks the floor.
+
+⚠️ **This deviates from a written decision.** CLAUDE.md §3 explicitly permits
+ruff's `target-version` to track the dev interpreter. That permission predates
+this consequence, and the decision's own rationale is portability — which the
+py314 setting was undoing. Flagged rather than done quietly; revert if you
+disagree.
+
+**784 green; ruff + mypy clean.** All on `feat/medical-disclaimers` → PR #31.
+
+---
+
+## Session 2026-08-03 — the BLE gate PASSED on the real MG strap 🎉
+
+**The project's single biggest technical risk (§10.1) is retired.** ADR-0012's
+acceptance test — does the owner's own MG-variant strap expose the `fd4b`
+family — was run in the human's own terminal and **passed**.
+
+`coach ble scan` found `WHOOP MG…` at −53 dBm **advertising the `fd4b` family**,
+and `coach ble probe` enumerated four services. Full output, identifiers
+scrubbed, in `tests/fixtures/whoop_ble/mg_gatt_probe_2026-08-03.json` — kept as
+the **baseline**, because firmware moves (risk #9) and the only way to notice is
+to have written down what it looked like when it worked.
+
+**Two findings that shape the adapter:**
+
+1. **`fd4b0006` is absent.** whoop-vault documents `fd4b0002–0007` on r52
+   "Maverick"; this MG exposes five (`0002, 0003, 0004, 0005, 0007`). Exactly
+   the MG-variant divergence ADR-0012 named as residual risk, now a concrete
+   known difference. **The drain must not assume `0006` exists — check this
+   first when building it.**
+2. **Live HR needs no reverse engineering.** Standard SIG Heart Rate
+   (`180d`/`2a37`) is exposed. 1 Hz HR with no `fd4b` framing, no CRC, no
+   handshake — a fallback that survives independently of firmware pushes
+   breaking the proprietary protocol. Materially de-risks §10.9.
+
+Also present: Battery (`180f`/`2a19`) and Device Information (`180a`).
+
+**Getting there took disproving two blockers and finding a third.** "Needs the
+strap" was false for the whole project. "Needs a `bleak` decision" was signed
+off. The real one was **macOS TCC**: `BleakScanner.discover()` died with SIGABRT
+(exit 134) and no Python exception, C stack showing
+`__TCC_CRASHING_DUE_TO_PRIVACY_VIOLATION__`. Granting Bluetooth to the host app
+**and restarting it** cleared it — the restart is the easy-to-miss part, since
+TCC caches per responsible app at launch.
+
+**Not built:** the historical drain, and any ingest. ADR-0012 §4 gates ingest on
+this result, and the result only just arrived. Nothing writes `whoop_ble` rows
+yet, so `compute/calibration.py` still has no honest cross-instrument pair.
+
+---
+
 ## Where the code stands (verified 2026-08-02)
 
 - **668 tests green; ruff + mypy clean. Schema at v14** (migrations 0001–0014).

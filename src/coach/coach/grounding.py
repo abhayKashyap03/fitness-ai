@@ -26,7 +26,9 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-SYSTEM_PROMPT = """\
+from ..disclaimer import LLM_SCOPE
+
+_FAITHFULNESS = """\
 You are a personal health & fitness coach for one user. You guide cuts and bulks
 using their real WHOOP recovery, body-weight trend, training, and (when present)
 nutrition data.
@@ -43,10 +45,13 @@ FAITHFULNESS — non-negotiable:
 - When get_safety_flags returns an alert, surface it plainly and do not soften or
   reword the safety message.
 
-SCOPE:
-- You are not a medical professional. Do not diagnose, read labs as diagnosis, or
-  advise on medication. Low recovery means "train lighter," never "you are ill."
 """
+
+# The scope half is imported rather than written here, so the model is held to
+# exactly the limits the USER was shown (§8.6). Two copies of this text would
+# drift, and the drift would be invisible: the user reads one and the model
+# obeys the other. A test pins the composition.
+SYSTEM_PROMPT = _FAITHFULNESS + LLM_SCOPE
 
 
 # Every scenario's fixture data ends on FIXTURE_LAST_DAY, and the agent is told

@@ -1,7 +1,63 @@
 # ADR-0012 — Adapter B (local BLE) approach for WHOOP 5.0 MG
 
-**Status:** Proposed (2026-07-25) — recon complete; final acceptance gated on a
-hardware test against the user's own strap. No BLE code ships from this ADR.
+**Status: ACCEPTED 2026-08-03.** The hardware gate in §4 below **passed on the
+owner's own WHOOP 5.0 MG strap.** This was the project's single biggest
+technical risk (§10.1) and it is now retired.
+
+## Gate result (2026-08-03)
+
+Run by the human in their own terminal — `coach ble scan` then `coach ble probe`
+(`adapters/whoop_ble/discover.py`; `bleak` behind the optional `[ble]` extra,
+§6.4 signed off). Full enumeration recorded, identifiers scrubbed, at
+[`tests/fixtures/whoop_ble/mg_gatt_probe_2026-08-03.json`](../../tests/fixtures/whoop_ble/mg_gatt_probe_2026-08-03.json).
+
+The strap advertised the `fd4b` family in its advertisement data (−53 dBm) and,
+on connection, exposed four services:
+
+| Service | What it is |
+|---|---|
+| `fd4b0001-cce1-4033-93ce-002d5875f58a` | **the 5.0/MG proprietary family** — the gate |
+| `0000180d` / `2a37` | **standard SIG Heart Rate Measurement** |
+| `0000180f` / `2a19` | Battery Level |
+| `0000180a` | Device Information |
+
+**Two findings that change the plan.**
+
+**1. `fd4b0006` is absent on MG.** whoop-vault documents `fd4b0002–0007` on
+firmware r52 "Maverick"; this strap exposes `0002, 0003, 0004, 0005, 0007` —
+five characteristics, not six. This is precisely the MG-variant divergence this
+ADR named as residual risk (a), and it is now a *known concrete difference*
+rather than an unknown. The drain implementation must not assume `0006` exists,
+and whichever function whoop-vault routes through it needs a different path or
+is unavailable here. **This is the thing to check first when the drain is built.**
+
+**2. Live HR needs no reverse engineering at all.** `180d`/`2a37` is plain
+Bluetooth SIG. Subscribing to it gives 1 Hz heart rate with no `fd4b` framing,
+no CRC, no handshake — a fallback path that survives independently of whether
+the proprietary drain keeps working across firmware pushes. That materially
+de-risks §10.9: even if WHOOP breaks the `fd4b` protocol tomorrow, the objective
+measurement most useful for calibration is still readable.
+
+Residual risk (c) — macOS/CoreBluetooth vs whoop-vault's Linux/BlueZ-only
+testing — is now **partly** retired: discovery and GATT enumeration work on
+macOS. The *drain* loop is still untested on this stack.
+
+### Blocker archaeology, worth keeping
+
+Three blockers were attached to this task over its life. Two were false when
+they were being repeated, and the third was found in seconds by executing it:
+
+- ~~"needs the physical strap"~~ — false for the whole project; it is worn daily.
+- ~~"needs a `bleak` dependency decision"~~ — signed off 2026-08-02.
+- **macOS TCC Bluetooth denial** — real. `BleakScanner.discover()` died with
+  SIGABRT (exit 134) and no Python exception; the C stack showed
+  `__TCC_CRASHING_DUE_TO_PRIVACY_VIOLATION__`. Granting Bluetooth to the host
+  application, **and restarting it**, cleared it. The restart is the part that
+  is easy to miss: TCC decisions are cached per responsible app at launch.
+
+The lesson this ADR should carry forward: **check whether a documented blocker
+is still real before repeating it**, and prefer running the thing to reasoning
+about it.
 
 ## Context
 
@@ -75,6 +131,8 @@ already model this perfectly; nothing in the schema changes.
    MG strap from the laptop, attempt discovery of `fd4b0001` services and a
    short drain. Its outcome (works / MG-differs / blocked) is the acceptance
    test that flips this ADR to Accepted or forces a rethink.
+   **→ PASSED 2026-08-03; see the Gate result section above.** Discovery and
+   enumeration confirmed; the drain itself is not yet attempted.
 
 ## Alternatives rejected
 

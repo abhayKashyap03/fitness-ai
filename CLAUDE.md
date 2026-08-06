@@ -396,9 +396,13 @@ subscription** — a Pro/Max plan grants no API access.
 
 ## 10. Things that will bite (known risk list)
 
-1. **WHOOP 5.0 MG local-read viability** — 5.0 demonstrated by community
-   projects; the MG variant + firmware churn remain the risk. Hardware spike
-   gates Adapter B (→ ADR-0012).
+1. **WHOOP 5.0 MG local-read viability** — **RETIRED 2026-08-03.** The hardware
+   gate passed on the owner's own MG strap: it advertises and exposes the
+   `fd4b0001` family, plus standard SIG Heart Rate (`180d`/`2a37`), so live HR
+   needs no reverse engineering at all (→ ADR-0012). Two things remain, and they
+   are narrower: **`fd4b0006` is absent on MG** where whoop-vault documents
+   `0002–0007`, so the drain must not assume it; and **firmware churn** is still
+   the standing threat (see #9).
 2. **Live API first contact** — everything WHOOP-side is built against synthetic
    fixtures. Field names and nesting will differ. Expected reconciliation, not
    failure. **Nothing new should be built on the spine until live ingest passes.**
@@ -453,7 +457,7 @@ compute layer with tests.
 | Source | Status |
 |---|---|
 | WHOOP Cloud API | ✅ Free OAuth 2.0 (v2). ~100 req/min. Requires active membership. **Recovery instrument only** — HRV/sleep/skin-temp/strain. Its auto-detected workouts are NOT the training log (ADR-0015). Recovery *formula* is proprietary — we get the score + inputs, not the weighting. Supplies UTC offset, not IANA zone. |
-| WHOOP local BLE | ⚠️ Unofficial. 5.0 protocol demonstrated (whoop-vault, NOOP — `fd4b` family); MG variant pending hardware spike (ADR-0012) |
+| WHOOP local BLE | ⚠️ Unofficial, but **confirmed on this MG strap 2026-08-03** (ADR-0012): `fd4b0001` family present (chars `0002-0005`, `0007`; **no `0006`**), plus standard SIG Heart Rate `180d`/`2a37`. Discovery + enumeration verified on macOS; the historical drain is not built yet. |
 | MyFitnessPal | **Authoritative for food AND training/exercise** (ADR-0015). API officially closed. **OVERRIDE (ADR-0010, signed off):** for THIS n=1 tool we ingest the user's OWN diary directly from MFP's private **v2 JSON API** — read only, authenticated with the user's pasted session cookie, **never** automating login. Fragile (private endpoints churn) but daily. The **Privacy Center → "Download My Data"** CSV export remains a valid, sanctioned occasional backfill. Do NOT generalize this override beyond the user's own account, and do NOT ship a scraper as a product feature. |
 | Apple HealthKit / Google Health Connect | ✅ But **not readable from a laptop** — data lives on-device. Bridge via Health export (XML zip). **Weight/body-comp source only** — MFP paywalled its Apple Health *nutrition* sync (~2024–25), so food does NOT reliably reach the export (n=1: 5 dietary days total, dead after 2026-02). |
 | USDA FoodData Central / Open Food Facts | ✅ Free, open — the intended nutrition DB path |
