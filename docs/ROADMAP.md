@@ -66,15 +66,27 @@ The post-membership path; the biggest open item. ADR-0012.
 
 ## P9 — The differentiator
 
-- **[Next Up · P1]** Recovery-informed training-load auto-scale on low-recovery days.
-- **[Blocked · P1]** Recovery→macro adjustment — **guarded**: HRV is NOISE today; must beat weight+intake before shipping (risk #6). _Depends: HRV showing signal._
+> **Pre-registered gate, 2026-08-02 ([ADR-0019](adr/0019-hosting-the-owners-instance.md) §8):**
+> recovery-informed *computation* is pursued, and judged at **n = 150 HRV days**
+> against the existing `hrv_verdict()` thresholds (autocorr ≥ 0.30 **and**
+> next-day |r| ≥ 0.20). Meets the bar → build. Misses → cut it, on that date,
+> without relitigating. The threshold is fixed **before** the data arrives on
+> purpose — that is what makes a null result honest (risk #6).
+> **Narration is not gated** and ships now: "recovery is low, train lighter"
+> needs no statistical claim (§8.6 already treats recovery as a signal). Only
+> numbers *driven* by HRV wait.
+
+- **[Next Up · P1]** Recovery-informed training-load auto-scale on low-recovery
+  days — **narration only** until the n=150 gate resolves.
+- **[Blocked · P1]** Recovery→macro adjustment — **guarded**: HRV is NOISE today; must beat weight+intake before shipping (risk #6). _Depends: the n=150 pre-registered gate._
 - **[Next Up · P1]** Plan TDEE-backed daily goal live. _Depends: 10+ logged-intake days (data accrual, no code)._
 - **[Done]** Protein target in the plan — `protein_status()` scales g/kg off the
   trend weight and reports target vs logged. It had been *stored and never read*
   since Phase 7 (0010's "future use" comment). No default g/kg is supplied: a
   recommended intake is a coaching opinion, not a measurement. Reported alongside
   plan status so it survives an insufficient TDEE.
-- **[Backlog]** Re-run HRV validation as data grows (revisit the NOISE verdict).
+- **[Backlog]** Re-run HRV validation as data grows — now a **countdown to the
+  n=150 decision date**, not an open-ended revisit.
   _Re-run 2026-07-30: still NOISE (autocorr +0.199, best next-day r 0.133, 72 HRV
   days — unchanged, no new recovery data in the window)._
 
@@ -98,14 +110,31 @@ The post-membership path; the biggest open item. ADR-0012.
 
 Lifts §11's no-server / no-multi-tenancy for real.
 
+> **Scope correction, 2026-08-02 ([ADR-0019](adr/0019-hosting-the-owners-instance.md)):**
+> the hosted instance is **the owner's own**. The 5–30 user invite-only beta
+> ADR-0018 described is **deferred, not cancelled** — the member machinery is
+> kept as hosting infrastructure, and the medical-disclaimer prerequisite stays
+> armed as a tripwire rather than a scheduled task. **The host becomes the only
+> instance:** the laptop stops holding live data and becomes the backup archive.
+
 - **[In Progress · EPIC · P1]** Multi-tenant backend (ADR-0018). **Foundation landed**
   (migration 0014): invite-only users, scrypt passwords, hashed session tokens,
   per-user secrets encrypted at rest. **Decided: SQLite on a volume, NOT hosted
   Postgres** — it keeps all 13 prior migrations and every view working unchanged,
-  and is a two-way door. Next: wire auth into the web app, then hosting.
+  and is a two-way door. Auth is now **wired into the web app** (PR B): per-request user, closed by
+  default, and a non-loopback bind with no claimed account refuses to start.
+- **[Next Up · P1]** Hosting, in the order ADR-0019 forces: **VPS → domain → TLS
+  → headless OAuth → migrate → cron sync → rehearse restore.** Domain + TLS are
+  *prerequisites*, not polish: WHOOP is authorised on the host via a public
+  `https://<domain>/callback`, so there is nothing to authorise until HTTPS is real.
+- **[Next Up]** Headless WHOOP login. `run_login` opens a browser and binds a
+  local `HTTPServer`; it cannot run on a VPS. _Depends: domain + TLS._
+- **[Next Up]** Nightly `coach db backup` on host cron, pulled off-host to the
+  laptop, **with a rehearsed restore**. Nothing in the repo schedules anything today.
+- **[Backlog]** Move WHOOP/MFP credentials out of `.credentials/u<id>/*.json`
+  into the encrypted `user_secret` store built in ADR-0018. _Depends: foundation._
 - **[Backlog]** Move compute + coach server-side (pure Python lifts cleanly). _Depends: foundation._
 - **[Backlog]** Ingest/sync as a service + `user_id` activation. _Depends: foundation._
-- **[Backlog]** Per-user secrets/config (not `.env`; encrypted; never logged). _Depends: foundation._
 - **[Backlog]** Observability + per-user LLM COGS caps. _Depends: foundation._
 
 ## P12 — Own food logging (product food source) · epics

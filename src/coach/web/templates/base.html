@@ -73,13 +73,25 @@
 <body>
 <header>
   <span class="brand">🏋️ Coach</span>
+  {% set me = request.state.user if request.state is defined else None %}
+  {# Signed out (login / invite): no app nav to offer, so the header is just a mark. #}
+  {% if me %}
   <nav>
     <a href="/" class="{{ 'on' if nav == 'dash' }}">Dashboard</a>
     <a href="/plan" class="{{ 'on' if nav == 'plan' }}">Plan</a>
     <a href="/coach" class="{{ 'on' if nav == 'coach' }}">Coach</a>
     <a href="/ops" class="{{ 'on' if nav == 'ops' }}">Ops</a>
     <a href="/doctor" class="{{ 'on' if nav == 'doctor' }}">Doctor</a>
+    {# Everyone needs this: it is where you change your password and sign out
+       everywhere. The owner-only parts (invites, account list) are gated inside
+       the page itself, not by hiding the whole tab — a member with no way to
+       change their password has no way to change their password at all. #}
+    <a href="/account" class="{{ 'on' if nav == 'account' }}">Account</a>
+    <form method="post" action="/logout" style="display:inline;margin:0">
+      <button type="submit" style="background:none;border:0;color:var(--muted);cursor:pointer;padding:0;font:inherit">Sign out</button>
+    </form>
   </nav>
+  {% endif %}
 </header>
 <main>{% block content %}{% endblock %}</main>
 </body>

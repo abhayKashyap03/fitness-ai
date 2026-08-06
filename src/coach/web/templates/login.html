@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Coach · Sign in{% endblock %}
+
+{% block content %}
+<h1>Sign in</h1>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<div class="card" style="max-width:26rem">
+  <form method="post" action="/login">
+    <label for="email">Email</label>
+    <input id="email" type="email" name="email" autocomplete="username" required autofocus>
+
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password"
+           autocomplete="current-password" required>
+
+    <p><button type="submit">Sign in</button></p>
+  </form>
+  <p class="note">Accounts are invite-only. There is no self-service password
+    reset yet — ask the owner to issue a new invite.</p>
+</div>
+{% endblock %}
